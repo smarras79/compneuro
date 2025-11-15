@@ -27,22 +27,22 @@ class NeuralData:
         lfp_tensor: LFP data at 1kHz sampling (channels × time × trials)
         cond_matrix: Condition matrix (trials × condition_labels)
         condition_labels: Names of condition variables
+        time_vector: Optional time vector in milliseconds. If None, defaults to -500 to +9500ms
         n_neurons: Number of recorded neurons
         n_trials: Number of trials
         n_timepoints: Number of time points
-        time_vector: Time vector in milliseconds (relative to start landmark onset)
     """
     neur_tensor: np.ndarray
     lfp_tensor: np.ndarray
     cond_matrix: np.ndarray
     condition_labels: List[str]
     filename: str = ""
+    time_vector: Optional[np.ndarray] = None
 
     # Derived properties
     n_neurons: int = field(init=False)
     n_trials: int = field(init=False)
     n_timepoints: int = field(init=False)
-    time_vector: np.ndarray = field(init=False)
 
     def __post_init__(self):
         """Calculate derived properties after initialization."""
@@ -50,8 +50,14 @@ class NeuralData:
         self.n_timepoints = self.neur_tensor.shape[1]
         self.n_trials = self.neur_tensor.shape[2]
 
-        # Time vector: -500ms to +9500ms in 1ms bins
-        self.time_vector = np.arange(-500, 9501, 1)
+        # Set time vector if not provided
+        if self.time_vector is None:
+            # Default: -500ms to +9500ms in 1ms bins (standard hippocampus recording)
+            if self.n_timepoints == 10001:
+                self.time_vector = np.arange(-500, 9501, 1)
+            else:
+                # For synthetic/test data, create a simple time vector
+                self.time_vector = np.arange(self.n_timepoints)
 
         # Validate dimensions
         assert len(self.time_vector) == self.n_timepoints, \
