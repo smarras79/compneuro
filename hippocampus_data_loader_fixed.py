@@ -1,6 +1,5 @@
 """
-Hippocampus Neural Data Loader
-Supports both old MATLAB formats and v7.3 (HDF5) formats
+Fixed Hippocampus Data Loader with HDF5/v7.3 MATLAB file support
 """
 import numpy as np
 import h5py
@@ -8,15 +7,9 @@ from scipy.io import loadmat
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
-
 class HippocampusDataLoader:
     """
     Loader for hippocampus neural data with support for both old and v7.3 MATLAB formats.
-    
-    Expected data structure:
-    - neur_tensor_trialon: (neurons × time × trials) neural firing rates in Hz
-    - cond_matrix: (trials × conditions) experimental conditions
-    - lfp_tensor_trialon: (channels × time × trials) optional LFP data
     """
     
     def __init__(self, filepath: str):
@@ -34,12 +27,11 @@ class HippocampusDataLoader:
         # Validate data
         self._validate_data()
         
+        # Create time vector (assuming 1ms bins, -500 to 9500ms)
+        self.time_vector = np.arange(-500, 9500)
+        
         # Store dimensions
         self.n_neurons, self.n_timepoints, self.n_trials = self.neur_tensor.shape
-        
-        # Create time vector based on actual data size
-        # Assuming 1ms bins, starting from -500ms
-        self.time_vector = np.arange(-500, -500 + self.n_timepoints)
         
     @staticmethod
     def _load_mat_file(filepath: str) -> Dict[str, Any]:
@@ -59,11 +51,11 @@ class HippocampusDataLoader:
         # Try loading with scipy first (for older MATLAB formats)
         try:
             data = loadmat(str(filepath), squeeze_me=False, struct_as_record=False)
-            print(f"✓ Loaded {filepath.name} using scipy.io.loadmat (MATLAB < v7.3)")
+            print(f"Loaded {filepath.name} using scipy.io.loadmat (MATLAB < v7.3)")
             return data
         except NotImplementedError:
             # File is in HDF5/v7.3 format, use h5py
-            print(f"✓ Loading {filepath.name} using h5py (MATLAB v7.3)")
+            print(f"Loading {filepath.name} using h5py (MATLAB v7.3)")
             return HippocampusDataLoader._load_hdf5_mat(filepath)
         except Exception as e:
             raise RuntimeError(f"Error loading {filepath}: {str(e)}")
@@ -126,10 +118,8 @@ class HippocampusDataLoader:
         """
         if field_name not in self.data_dict:
             if required:
-                available_fields = [k for k in self.data_dict.keys() 
-                                  if not k.startswith('__')]
-                raise ValueError(f"Required field '{field_name}' not found in data file.\n"
-                               f"Available fields: {available_fields}")
+                raise ValueError(f"Required field '{field_name}' not found in data file. "
+                               f"Available fields: {list(self.data_dict.keys())}")
             return None
         
         data = self.data_dict[field_name]
@@ -159,8 +149,6 @@ class HippocampusDataLoader:
         if n_trials_neural != n_trials_cond:
             raise ValueError(f"Trial count mismatch: neural data has {n_trials_neural} trials, "
                            f"condition matrix has {n_trials_cond} trials")
-        
-        print(f"✓ Data validation passed")
     
     @classmethod
     def load_mat_file(cls, filepath: str) -> 'HippocampusDataLoader':
@@ -178,22 +166,18 @@ class HippocampusDataLoader:
     def summary(self) -> str:
         """Generate a summary of the loaded data."""
         summary_lines = [
-            f"\nData Summary: {self.filepath.name}",
-            "=" * 70,
+            f"Data Summary for {self.filepath.name}",
+            "=" * 60,
             f"Neural tensor shape: {self.neur_tensor.shape} (neurons × time × trials)",
             f"  - {self.n_neurons} neurons",
-            f"  - {self.n_timepoints} time points (1ms bins)",
+            f"  - {self.n_timepoints} time points",
             f"  - {self.n_trials} trials",
             f"Condition matrix shape: {self.cond_matrix.shape} (trials × conditions)",
-            f"Time vector: {self.time_vector[0]} to {self.time_vector[-1]} ms ({len(self.time_vector)} points)",
-            f"Mean firing rate: {np.mean(self.neur_tensor):.2f} Hz",
-            f"Max firing rate: {np.max(self.neur_tensor):.2f} Hz",
+            f"Time vector: {self.time_vector[0]} to {self.time_vector[-1]} ms",
         ]
         
         if self.lfp_tensor is not None:
             summary_lines.append(f"LFP tensor shape: {self.lfp_tensor.shape}")
-        
-        summary_lines.append("=" * 70)
         
         return "\n".join(summary_lines)
     
@@ -316,18 +300,18 @@ class HippocampusDataLoader:
         return activity
 
 
-if __name__ == "__main__":
+def test_loader():
+    """Test the data loader with both MATLAB formats."""
     import sys
     
     if len(sys.argv) < 2:
-        print("Usage: python hippocampus_data_loader.py <path_to_mat_file>")
-        sys.exit(1)
+        print("Usage: python hippocampus_data_loader_fixed.py <path_to_mat_file>")
+        return
     
     filepath = sys.argv[1]
     
-    print(f"\n{'='*70}")
-    print(f"Testing Hippocampus Data Loader")
-    print(f"{'='*70}")
+    print(f"\nLoading: {filepath}")
+    print("-" * 60)
     
     try:
         # Load data
@@ -337,10 +321,8 @@ if __name__ == "__main__":
         print(data.summary())
         
         # Try filtering
-        print("\n" + "=" * 70)
-        print("Trial Filtering Examples")
-        print("=" * 70)
-        
+        print("\n" + "=" * 60)
+        print("Testing trial filtering...")
         mn_trials = data.get_mental_navigation_trials()
         print(f"Mental navigation trials: {np.sum(mn_trials)} / {data.n_trials}")
         
@@ -353,12 +335,13 @@ if __name__ == "__main__":
         print(f"Extracted activity shape: {activity.shape}")
         print(f"Mean firing rate: {np.mean(activity):.2f} Hz")
         
-        print("\n" + "=" * 70)
-        print("✓ Data loader test SUCCESSFUL!")
-        print("=" * 70 + "\n")
+        print("\n✓ Data loader test successful!")
         
     except Exception as e:
         print(f"\n✗ Error: {str(e)}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
+
+
+if __name__ == "__main__":
+    test_loader()
