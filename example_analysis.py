@@ -75,6 +75,48 @@ def run_complete_analysis(data_file: str, output_dir: str = 'results'):
         print(f"  Using {n_mn_trials} successful trials")
     
     # -------------------------------------------------------------------------
+    # STEP 2.5: TA vs TP Benchmark Plot
+    # -------------------------------------------------------------------------
+    print("\n" + "-"*70)
+    print("STEP 2.5: Temporal production benchmark (TA vs TP)")
+    print("-"*70)
+    
+    # Create TA vs TP plot with default mask (column 10 == 1)
+    print("\nGenerating TA vs TP benchmark plot...")
+    fig = NeuralVisualizer.plot_ta_vs_tp(data, trial_mask=None)
+    save_figure(fig, session_dir / 'ta_vs_tp_benchmark.png')
+    
+    # Create detailed TA vs TP plot
+    print("Generating detailed TA vs TP analysis...")
+    fig = NeuralVisualizer.plot_ta_vs_tp_detailed(data, trial_mask=None, color_by='curr')
+    save_figure(fig, session_dir / 'ta_vs_tp_detailed.png')
+    
+    # -------------------------------------------------------------------------
+    # STEP 2.6: RT vs TA Benchmark Plot
+    # -------------------------------------------------------------------------
+    print("\n" + "-"*70)
+    print("STEP 2.6: Reaction time analysis (RT vs TA)")
+    print("-"*70)
+    
+    # Check if RT column exists (typically column 12, index 11)
+    if data.cond_matrix.shape[1] > 11:
+        try:
+            print("\nGenerating RT vs TA benchmark plot...")
+            fig = NeuralVisualizer.plot_rt_vs_ta(data, trial_mask=None, rt_column=11)
+            save_figure(fig, session_dir / 'rt_vs_ta_benchmark.png')
+            
+            print("Generating detailed RT vs TA analysis...")
+            fig = NeuralVisualizer.plot_rt_vs_ta_detailed(data, trial_mask=None, 
+                                                          rt_column=11, color_by='curr')
+            save_figure(fig, session_dir / 'rt_vs_ta_detailed.png')
+        except Exception as e:
+            print(f"  Warning: Could not generate RT plots: {e}")
+            print(f"  Skipping RT analysis...")
+    else:
+        print(f"  RT column not found (need at least 12 columns, have {data.cond_matrix.shape[1]})")
+        print(f"  Skipping RT analysis...")
+    
+    # -------------------------------------------------------------------------
     # STEP 3: Temporal Coding Analysis
     # -------------------------------------------------------------------------
     print("\n" + "-"*70)
@@ -239,6 +281,71 @@ def run_complete_analysis(data_file: str, output_dir: str = 'results'):
         f.write("TRIAL SELECTION\n")
         f.write("-"*70 + "\n")
         f.write(f"Mental navigation trials: {n_mn_trials} / {data.n_trials}\n\n")
+        
+        f.write("-"*70 + "\n")
+        f.write("TEMPORAL PRODUCTION BENCHMARK (TA vs TP)\n")
+        f.write("-"*70 + "\n")
+        
+        # Get TA vs TP data
+        ta = data.cond_matrix[:, 0]
+        tp = data.cond_matrix[:, 1]
+        
+        # Use column 10 == 1 mask
+        if data.cond_matrix.shape[1] > 9:
+            benchmark_mask = data.cond_matrix[:, 9] == 1
+        else:
+            benchmark_mask = np.ones(len(ta), dtype=bool)
+        
+        ta_bench = ta[benchmark_mask]
+        tp_bench = tp[benchmark_mask]
+        error = tp_bench - ta_bench
+        
+        # Calculate statistics
+        from scipy import stats
+        slope, intercept, r_value, p_value, std_err = stats.linregress(ta_bench, tp_bench)
+        
+        f.write(f"Number of benchmark trials: {len(ta_bench)}\n")
+        f.write(f"TA range: [{np.min(ta_bench):.3f}, {np.max(ta_bench):.3f}] s\n")
+        f.write(f"TP range: [{np.min(tp_bench):.3f}, {np.max(tp_bench):.3f}] s\n")
+        f.write(f"\nCorrelation (TA vs TP): {r_value:.4f}\n")
+        f.write(f"Linear fit: TP = {slope:.4f} * TA + {intercept:.4f}\n")
+        f.write(f"p-value: {p_value:.2e}\n")
+        f.write(f"\nMean error (TP-TA): {np.mean(error):.4f} s\n")
+        f.write(f"Std error: {np.std(error):.4f} s\n")
+        f.write(f"Mean absolute error: {np.mean(np.abs(error)):.4f} s\n")
+        f.write(f"RMSE: {np.sqrt(np.mean(error**2)):.4f} s\n")
+        f.write(f"Median relative error: {np.median((error/ta_bench)*100):.2f}%\n\n")
+        
+        # Add RT statistics if available
+        if data.cond_matrix.shape[1] > 11:
+            try:
+                rt = data.cond_matrix[:, 11]
+                rt_bench = rt[benchmark_mask]
+                
+                # Remove invalid RTs
+                valid_rt = ~np.isnan(rt_bench) & (rt_bench > 0) & (rt_bench < 100)
+                rt_valid = rt_bench[valid_rt]
+                ta_rt = ta_bench[valid_rt]
+                
+                if len(rt_valid) > 0:
+                    f.write("-"*70 + "\n")
+                    f.write("REACTION TIME ANALYSIS (RT vs TA)\n")
+                    f.write("-"*70 + "\n")
+                    
+                    rt_slope, rt_intercept, rt_r, rt_p, rt_stderr = stats.linregress(ta_rt, rt_valid)
+                    cv_rt = np.std(rt_valid) / np.mean(rt_valid)
+                    
+                    f.write(f"Number of valid RT trials: {len(rt_valid)}\n")
+                    f.write(f"Mean RT: {np.mean(rt_valid):.4f} s\n")
+                    f.write(f"Std RT: {np.std(rt_valid):.4f} s\n")
+                    f.write(f"Median RT: {np.median(rt_valid):.4f} s\n")
+                    f.write(f"RT range: [{np.min(rt_valid):.4f}, {np.max(rt_valid):.4f}] s\n")
+                    f.write(f"Coefficient of variation: {cv_rt:.4f}\n")
+                    f.write(f"\nRT vs TA correlation: {rt_r:.4f}\n")
+                    f.write(f"Linear fit: RT = {rt_slope:.4f} * TA + {rt_intercept:.4f}\n")
+                    f.write(f"p-value: {rt_p:.2e}\n\n")
+            except Exception as e:
+                f.write(f"\nRT analysis: Could not analyze RT data ({e})\n\n")
         
         f.write("-"*70 + "\n")
         f.write("TEMPORAL CODING\n")

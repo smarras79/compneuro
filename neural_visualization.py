@@ -390,6 +390,580 @@ class NeuralVisualizer:
         
         plt.tight_layout()
         return fig
+    
+    @staticmethod
+    def plot_ta_vs_tp(neural_data,
+                     trial_mask: Optional[np.ndarray] = None,
+                     figsize: tuple = (10, 8)) -> plt.Figure:
+        """
+        Plot True Temporal Distance (TA) vs Produced Temporal Distance (TP).
+        
+        This creates a benchmark plot showing how accurately the subject produced
+        temporal intervals. Points along the diagonal indicate perfect performance.
+        
+        Args:
+            neural_data: HippocampusDataLoader instance
+            trial_mask: Optional boolean mask to filter trials
+                       If None, uses column 10 == 1 from cond_matrix
+            figsize: Figure size
+            
+        Returns:
+            Matplotlib figure
+        """
+        # Get TA and TP from condition matrix
+        ta = neural_data.cond_matrix[:, 0]  # Column 1 (0-indexed)
+        tp = neural_data.cond_matrix[:, 1]  # Column 2 (0-indexed)
+        
+        # Apply trial mask
+        if trial_mask is None:
+            # Default: use column 10 == 1 (9 in 0-indexed)
+            if neural_data.cond_matrix.shape[1] > 9:
+                trial_mask = neural_data.cond_matrix[:, 9] == 1
+                print(f"Using default mask: column 10 == 1 ({np.sum(trial_mask)} trials)")
+            else:
+                trial_mask = np.ones(len(ta), dtype=bool)
+                print(f"Column 10 not found, using all {len(ta)} trials")
+        
+        # Filter data
+        ta_filtered = ta[trial_mask]
+        tp_filtered = tp[trial_mask]
+        
+        # Create figure with subplots
+        fig = plt.figure(figsize=figsize)
+        gs = GridSpec(2, 2, figure=fig, height_ratios=[3, 1], width_ratios=[3, 1])
+        
+        # Main scatter plot
+        ax_main = fig.add_subplot(gs[0, 0])
+        
+        # Plot data points
+        scatter = ax_main.scatter(ta_filtered, tp_filtered, 
+                                 alpha=0.6, s=50, c='steelblue', 
+                                 edgecolors='black', linewidth=0.5)
+        
+        # Add unity line (perfect performance)
+        min_val = min(np.min(ta_filtered), np.min(tp_filtered))
+        max_val = max(np.max(ta_filtered), np.max(tp_filtered))
+        ax_main.plot([min_val, max_val], [min_val, max_val], 
+                    'r--', linewidth=2, alpha=0.7, label='Unity (Perfect)')
+        
+        # Add regression line
+        from scipy import stats
+        slope, intercept, r_value, p_value, std_err = stats.linregress(ta_filtered, tp_filtered)
+        line_x = np.array([min_val, max_val])
+        line_y = slope * line_x + intercept
+        ax_main.plot(line_x, line_y, 'g-', linewidth=2, alpha=0.7,
+                    label=f'Fit: y={slope:.2f}x+{intercept:.2f}\n$r$={r_value:.3f}, $p$<{p_value:.1e}')
+        
+        # Calculate error metrics
+        error = tp_filtered - ta_filtered
+        mae = np.mean(np.abs(error))
+        rmse = np.sqrt(np.mean(error**2))
+        
+        # Labels and title
+        ax_main.set_xlabel('True Temporal Distance (TA) [s]', fontsize=12)
+        ax_main.set_ylabel('Produced Temporal Distance (TP) [s]', fontsize=12)
+        ax_main.set_title(f'Temporal Production Performance\n'
+                         f'n={len(ta_filtered)} trials, MAE={mae:.3f}s, RMSE={rmse:.3f}s',
+                         fontsize=13)
+        ax_main.legend(loc='upper left', frameon=True, fontsize=10)
+        ax_main.grid(True, alpha=0.3)
+        ax_main.set_aspect('equal', adjustable='box')
+        sns.despine(ax=ax_main)
+        
+        # Marginal histogram for TA (bottom)
+        ax_bottom = fig.add_subplot(gs[1, 0], sharex=ax_main)
+        ax_bottom.hist(ta_filtered, bins=30, color='steelblue', alpha=0.7, edgecolor='black')
+        ax_bottom.set_xlabel('TA [s]', fontsize=10)
+        ax_bottom.set_ylabel('Count', fontsize=10)
+        ax_bottom.set_title('TA Distribution', fontsize=10)
+        plt.setp(ax_main.get_xticklabels(), visible=False)
+        sns.despine(ax=ax_bottom)
+        
+        # Marginal histogram for TP (right)
+        ax_right = fig.add_subplot(gs[0, 1], sharey=ax_main)
+        ax_right.hist(tp_filtered, bins=30, orientation='horizontal', 
+                     color='steelblue', alpha=0.7, edgecolor='black')
+        ax_right.set_ylabel('TP [s]', fontsize=10)
+        ax_right.set_xlabel('Count', fontsize=10)
+        ax_right.set_title('TP Distribution', fontsize=10, rotation=270, pad=15)
+        plt.setp(ax_main.get_yticklabels(), visible=False)
+        sns.despine(ax=ax_right)
+        
+        # Error histogram (bottom right)
+        ax_error = fig.add_subplot(gs[1, 1])
+        ax_error.hist(error, bins=30, color='coral', alpha=0.7, edgecolor='black')
+        ax_error.axvline(0, color='red', linestyle='--', linewidth=2, alpha=0.7)
+        ax_error.set_xlabel('Error (TP-TA) [s]', fontsize=9)
+        ax_error.set_ylabel('Count', fontsize=9)
+        ax_error.set_title(f'Error Distribution\nMean={np.mean(error):.3f}s', fontsize=9)
+        sns.despine(ax=ax_error)
+        
+        plt.tight_layout()
+        return fig
+    
+    @staticmethod
+    def plot_ta_vs_tp_detailed(neural_data,
+                               trial_mask: Optional[np.ndarray] = None,
+                               color_by: Optional[str] = None,
+                               figsize: tuple = (14, 10)) -> plt.Figure:
+        """
+        Detailed TA vs TP plot with additional analyses.
+        
+        Args:
+            neural_data: HippocampusDataLoader instance
+            trial_mask: Optional boolean mask to filter trials
+            color_by: Optional condition to color points by ('curr', 'target', 'succ', etc.)
+            figsize: Figure size
+            
+        Returns:
+            Matplotlib figure
+        """
+        # Get TA and TP
+        ta = neural_data.cond_matrix[:, 0]
+        tp = neural_data.cond_matrix[:, 1]
+        
+        # Apply trial mask
+        if trial_mask is None:
+            if neural_data.cond_matrix.shape[1] > 9:
+                trial_mask = neural_data.cond_matrix[:, 9] == 1
+            else:
+                trial_mask = np.ones(len(ta), dtype=bool)
+        
+        ta_filtered = ta[trial_mask]
+        tp_filtered = tp[trial_mask]
+        
+        # Create figure
+        fig = plt.figure(figsize=figsize)
+        gs = GridSpec(2, 3, figure=fig)
+        
+        # Main scatter plot with optional coloring
+        ax1 = fig.add_subplot(gs[0, :2])
+        
+        if color_by is not None:
+            try:
+                color_data = neural_data.get_condition(color_by)[trial_mask]
+                scatter = ax1.scatter(ta_filtered, tp_filtered, 
+                                    c=color_data, cmap='tab10',
+                                    alpha=0.6, s=50, edgecolors='black', linewidth=0.5)
+                plt.colorbar(scatter, ax=ax1, label=color_by.upper())
+            except:
+                print(f"Warning: Could not color by '{color_by}', using default")
+                ax1.scatter(ta_filtered, tp_filtered, 
+                           alpha=0.6, s=50, c='steelblue',
+                           edgecolors='black', linewidth=0.5)
+        else:
+            ax1.scatter(ta_filtered, tp_filtered, 
+                       alpha=0.6, s=50, c='steelblue',
+                       edgecolors='black', linewidth=0.5)
+        
+        # Unity line
+        min_val = min(np.min(ta_filtered), np.min(tp_filtered))
+        max_val = max(np.max(ta_filtered), np.max(tp_filtered))
+        ax1.plot([min_val, max_val], [min_val, max_val], 
+                'r--', linewidth=2, alpha=0.7, label='Unity')
+        
+        # Regression
+        from scipy import stats
+        slope, intercept, r_value, p_value, std_err = stats.linregress(ta_filtered, tp_filtered)
+        line_x = np.array([min_val, max_val])
+        line_y = slope * line_x + intercept
+        ax1.plot(line_x, line_y, 'g-', linewidth=2, alpha=0.7,
+                label=f'Fit: r={r_value:.3f}')
+        
+        ax1.set_xlabel('True Temporal Distance (TA) [s]')
+        ax1.set_ylabel('Produced Temporal Distance (TP) [s]')
+        ax1.set_title(f'TA vs TP (n={len(ta_filtered)} trials)')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        ax1.set_aspect('equal')
+        sns.despine(ax=ax1)
+        
+        # Error vs TA
+        ax2 = fig.add_subplot(gs[0, 2])
+        error = tp_filtered - ta_filtered
+        ax2.scatter(ta_filtered, error, alpha=0.5, s=30, c='coral')
+        ax2.axhline(0, color='red', linestyle='--', linewidth=2)
+        ax2.set_xlabel('TA [s]')
+        ax2.set_ylabel('Error (TP-TA) [s]')
+        ax2.set_title('Error vs TA')
+        ax2.grid(True, alpha=0.3)
+        sns.despine(ax=ax2)
+        
+        # Relative error
+        ax3 = fig.add_subplot(gs[1, 0])
+        relative_error = (tp_filtered - ta_filtered) / ta_filtered * 100
+        ax3.hist(relative_error, bins=30, color='purple', alpha=0.7, edgecolor='black')
+        ax3.axvline(0, color='red', linestyle='--', linewidth=2)
+        ax3.set_xlabel('Relative Error (%)')
+        ax3.set_ylabel('Count')
+        ax3.set_title(f'Relative Error\nMedian={np.median(relative_error):.1f}%')
+        sns.despine(ax=ax3)
+        
+        # Absolute error
+        ax4 = fig.add_subplot(gs[1, 1])
+        abs_error = np.abs(error)
+        ax4.hist(abs_error, bins=30, color='orange', alpha=0.7, edgecolor='black')
+        ax4.set_xlabel('Absolute Error [s]')
+        ax4.set_ylabel('Count')
+        ax4.set_title(f'Absolute Error\nMAE={np.mean(abs_error):.3f}s')
+        sns.despine(ax=ax4)
+        
+        # Statistics table
+        ax5 = fig.add_subplot(gs[1, 2])
+        ax5.axis('off')
+        
+        # Calculate statistics
+        stats_text = f"""
+        PERFORMANCE STATISTICS
+        {'='*30}
+        N trials:        {len(ta_filtered)}
+        
+        Correlation:     {r_value:.4f}
+        Slope:           {slope:.4f}
+        Intercept:       {intercept:.4f}
+        p-value:         {p_value:.2e}
+        
+        Mean Error:      {np.mean(error):.4f} s
+        Std Error:       {np.std(error):.4f} s
+        MAE:             {np.mean(abs_error):.4f} s
+        RMSE:            {np.sqrt(np.mean(error**2)):.4f} s
+        
+        Median Rel Err:  {np.median(relative_error):.2f}%
+        
+        TA Range:        [{np.min(ta_filtered):.2f}, {np.max(ta_filtered):.2f}] s
+        TP Range:        [{np.min(tp_filtered):.2f}, {np.max(tp_filtered):.2f}] s
+        """
+        
+        ax5.text(0.1, 0.9, stats_text, transform=ax5.transAxes,
+                fontsize=9, verticalalignment='top', 
+                fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+        
+        plt.tight_layout()
+        return fig
+    
+    @staticmethod
+    def plot_rt_vs_ta(neural_data,
+                     trial_mask: Optional[np.ndarray] = None,
+                     rt_column: int = 11,
+                     figsize: tuple = (10, 8)) -> plt.Figure:
+        """
+        Plot Reaction Time (RT) vs True Temporal Distance (TA).
+        
+        This analyzes how response time varies with the temporal interval.
+        
+        Args:
+            neural_data: HippocampusDataLoader instance
+            trial_mask: Optional boolean mask to filter trials
+                       If None, uses column 10 == 1 from cond_matrix
+            rt_column: Column index for reaction time (default: 11, which is column 12)
+            figsize: Figure size
+            
+        Returns:
+            Matplotlib figure
+        """
+        # Get TA and RT from condition matrix
+        ta = neural_data.cond_matrix[:, 0]  # Column 1 (0-indexed)
+        
+        # Check if RT column exists
+        if neural_data.cond_matrix.shape[1] <= rt_column:
+            raise ValueError(
+                f"RT column {rt_column} (0-indexed) not found in condition matrix.\n"
+                f"Condition matrix has {neural_data.cond_matrix.shape[1]} columns.\n"
+                f"Please specify the correct column index using rt_column parameter."
+            )
+        
+        rt = neural_data.cond_matrix[:, rt_column]
+        
+        # Apply trial mask
+        if trial_mask is None:
+            # Default: use column 10 == 1 (9 in 0-indexed)
+            if neural_data.cond_matrix.shape[1] > 9:
+                trial_mask = neural_data.cond_matrix[:, 9] == 1
+                print(f"Using default mask: column 10 == 1 ({np.sum(trial_mask)} trials)")
+            else:
+                trial_mask = np.ones(len(ta), dtype=bool)
+                print(f"Column 10 not found, using all {len(ta)} trials")
+        
+        # Filter data and remove invalid RT values (NaN, negative, or extremely large)
+        ta_filtered = ta[trial_mask]
+        rt_filtered = rt[trial_mask]
+        
+        # Remove invalid RTs
+        valid_rt = ~np.isnan(rt_filtered) & (rt_filtered > 0) & (rt_filtered < 100)
+        ta_filtered = ta_filtered[valid_rt]
+        rt_filtered = rt_filtered[valid_rt]
+        
+        if len(rt_filtered) == 0:
+            raise ValueError("No valid reaction time data found. Check RT column index.")
+        
+        print(f"Valid RT trials: {len(rt_filtered)} / {np.sum(trial_mask)}")
+        
+        # Create figure with subplots
+        fig = plt.figure(figsize=figsize)
+        gs = GridSpec(2, 2, figure=fig, height_ratios=[3, 1], width_ratios=[3, 1])
+        
+        # Main scatter plot
+        ax_main = fig.add_subplot(gs[0, 0])
+        
+        # Plot data points
+        scatter = ax_main.scatter(ta_filtered, rt_filtered, 
+                                 alpha=0.6, s=50, c='darkgreen', 
+                                 edgecolors='black', linewidth=0.5)
+        
+        # Add regression line
+        from scipy import stats
+        slope, intercept, r_value, p_value, std_err = stats.linregress(ta_filtered, rt_filtered)
+        line_x = np.array([np.min(ta_filtered), np.max(ta_filtered)])
+        line_y = slope * line_x + intercept
+        ax_main.plot(line_x, line_y, 'r-', linewidth=2, alpha=0.7,
+                    label=f'Fit: RT={slope:.3f}*TA+{intercept:.3f}\n$r$={r_value:.3f}, $p$={p_value:.1e}')
+        
+        # Add horizontal line at mean RT
+        mean_rt = np.mean(rt_filtered)
+        ax_main.axhline(mean_rt, color='blue', linestyle='--', linewidth=1.5, alpha=0.5,
+                       label=f'Mean RT={mean_rt:.3f}s')
+        
+        # Calculate CV (coefficient of variation)
+        cv_rt = np.std(rt_filtered) / np.mean(rt_filtered)
+        
+        # Labels and title
+        ax_main.set_xlabel('True Temporal Distance (TA) [s]', fontsize=12)
+        ax_main.set_ylabel('Reaction Time (RT) [s]', fontsize=12)
+        ax_main.set_title(f'Reaction Time vs Temporal Distance\n'
+                         f'n={len(rt_filtered)} trials, Mean RT={mean_rt:.3f}s, CV={cv_rt:.3f}',
+                         fontsize=13)
+        ax_main.legend(loc='best', frameon=True, fontsize=10)
+        ax_main.grid(True, alpha=0.3)
+        sns.despine(ax=ax_main)
+        
+        # Marginal histogram for TA (bottom)
+        ax_bottom = fig.add_subplot(gs[1, 0], sharex=ax_main)
+        ax_bottom.hist(ta_filtered, bins=30, color='darkgreen', alpha=0.7, edgecolor='black')
+        ax_bottom.set_xlabel('TA [s]', fontsize=10)
+        ax_bottom.set_ylabel('Count', fontsize=10)
+        ax_bottom.set_title('TA Distribution', fontsize=10)
+        plt.setp(ax_main.get_xticklabels(), visible=False)
+        sns.despine(ax=ax_bottom)
+        
+        # Marginal histogram for RT (right)
+        ax_right = fig.add_subplot(gs[0, 1], sharey=ax_main)
+        ax_right.hist(rt_filtered, bins=30, orientation='horizontal', 
+                     color='darkgreen', alpha=0.7, edgecolor='black')
+        ax_right.set_ylabel('RT [s]', fontsize=10)
+        ax_right.set_xlabel('Count', fontsize=10)
+        ax_right.set_title('RT Distribution', fontsize=10, rotation=270, pad=15)
+        plt.setp(ax_main.get_yticklabels(), visible=False)
+        sns.despine(ax=ax_right)
+        
+        # Statistics box (bottom right)
+        ax_stats = fig.add_subplot(gs[1, 1])
+        ax_stats.axis('off')
+        
+        # Calculate additional statistics
+        stats_text = f"""RT STATISTICS
+{'='*20}
+Mean: {np.mean(rt_filtered):.3f} s
+Std:  {np.std(rt_filtered):.3f} s
+Median: {np.median(rt_filtered):.3f} s
+CV:   {cv_rt:.3f}
+
+Range: [{np.min(rt_filtered):.3f}, 
+        {np.max(rt_filtered):.3f}] s
+
+Correlation: {r_value:.3f}
+Slope: {slope:.3f} s/s
+        """
+        
+        ax_stats.text(0.1, 0.9, stats_text, transform=ax_stats.transAxes,
+                     fontsize=8, verticalalignment='top', 
+                     fontfamily='monospace',
+                     bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.3))
+        
+        plt.tight_layout()
+        return fig
+    
+    @staticmethod
+    def plot_rt_vs_ta_detailed(neural_data,
+                               trial_mask: Optional[np.ndarray] = None,
+                               rt_column: int = 11,
+                               color_by: Optional[str] = None,
+                               figsize: tuple = (14, 10)) -> plt.Figure:
+        """
+        Detailed RT vs TA plot with additional analyses.
+        
+        Args:
+            neural_data: HippocampusDataLoader instance
+            trial_mask: Optional boolean mask to filter trials
+            rt_column: Column index for reaction time (default: 11)
+            color_by: Optional condition to color points by ('curr', 'target', 'succ', etc.)
+            figsize: Figure size
+            
+        Returns:
+            Matplotlib figure
+        """
+        # Get TA and RT
+        ta = neural_data.cond_matrix[:, 0]
+        
+        if neural_data.cond_matrix.shape[1] <= rt_column:
+            raise ValueError(f"RT column {rt_column} not found. Matrix has {neural_data.cond_matrix.shape[1]} columns.")
+        
+        rt = neural_data.cond_matrix[:, rt_column]
+        
+        # Apply trial mask
+        if trial_mask is None:
+            if neural_data.cond_matrix.shape[1] > 9:
+                trial_mask = neural_data.cond_matrix[:, 9] == 1
+            else:
+                trial_mask = np.ones(len(ta), dtype=bool)
+        
+        ta_filtered = ta[trial_mask]
+        rt_filtered = rt[trial_mask]
+        
+        # Remove invalid RTs
+        valid_rt = ~np.isnan(rt_filtered) & (rt_filtered > 0) & (rt_filtered < 100)
+        ta_filtered = ta_filtered[valid_rt]
+        rt_filtered = rt_filtered[valid_rt]
+        
+        # Create figure
+        fig = plt.figure(figsize=figsize)
+        gs = GridSpec(2, 3, figure=fig)
+        
+        # Main scatter plot with optional coloring
+        ax1 = fig.add_subplot(gs[0, :2])
+        
+        if color_by is not None:
+            try:
+                # Get color data with same filtering
+                color_data_full = neural_data.get_condition(color_by)[trial_mask]
+                color_data = color_data_full[valid_rt]
+                scatter = ax1.scatter(ta_filtered, rt_filtered, 
+                                    c=color_data, cmap='tab10',
+                                    alpha=0.6, s=50, edgecolors='black', linewidth=0.5)
+                plt.colorbar(scatter, ax=ax1, label=color_by.upper())
+            except:
+                print(f"Warning: Could not color by '{color_by}', using default")
+                ax1.scatter(ta_filtered, rt_filtered, 
+                           alpha=0.6, s=50, c='darkgreen',
+                           edgecolors='black', linewidth=0.5)
+        else:
+            ax1.scatter(ta_filtered, rt_filtered, 
+                       alpha=0.6, s=50, c='darkgreen',
+                       edgecolors='black', linewidth=0.5)
+        
+        # Regression
+        from scipy import stats
+        slope, intercept, r_value, p_value, std_err = stats.linregress(ta_filtered, rt_filtered)
+        line_x = np.array([np.min(ta_filtered), np.max(ta_filtered)])
+        line_y = slope * line_x + intercept
+        ax1.plot(line_x, line_y, 'r-', linewidth=2, alpha=0.7,
+                label=f'Fit: r={r_value:.3f}')
+        
+        # Mean RT line
+        mean_rt = np.mean(rt_filtered)
+        ax1.axhline(mean_rt, color='blue', linestyle='--', alpha=0.5,
+                   label=f'Mean RT={mean_rt:.3f}s')
+        
+        ax1.set_xlabel('True Temporal Distance (TA) [s]')
+        ax1.set_ylabel('Reaction Time (RT) [s]')
+        ax1.set_title(f'RT vs TA (n={len(rt_filtered)} trials)')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        sns.despine(ax=ax1)
+        
+        # RT variability vs TA (binned analysis)
+        ax2 = fig.add_subplot(gs[0, 2])
+        # Bin TA and compute RT mean and std for each bin
+        n_bins = 10
+        ta_bins = np.linspace(np.min(ta_filtered), np.max(ta_filtered), n_bins+1)
+        bin_centers = (ta_bins[:-1] + ta_bins[1:]) / 2
+        bin_means = []
+        bin_stds = []
+        
+        for i in range(n_bins):
+            mask = (ta_filtered >= ta_bins[i]) & (ta_filtered < ta_bins[i+1])
+            if np.sum(mask) > 0:
+                bin_means.append(np.mean(rt_filtered[mask]))
+                bin_stds.append(np.std(rt_filtered[mask]))
+            else:
+                bin_means.append(np.nan)
+                bin_stds.append(np.nan)
+        
+        bin_means = np.array(bin_means)
+        bin_stds = np.array(bin_stds)
+        
+        ax2.errorbar(bin_centers, bin_means, yerr=bin_stds, fmt='o-', 
+                    color='darkgreen', capsize=5, capthick=2, alpha=0.7)
+        ax2.set_xlabel('TA [s]')
+        ax2.set_ylabel('RT [s]')
+        ax2.set_title('RT Mean ± SD (binned)')
+        ax2.grid(True, alpha=0.3)
+        sns.despine(ax=ax2)
+        
+        # RT distribution
+        ax3 = fig.add_subplot(gs[1, 0])
+        ax3.hist(rt_filtered, bins=30, color='darkgreen', alpha=0.7, edgecolor='black')
+        ax3.axvline(mean_rt, color='red', linestyle='--', linewidth=2, label='Mean')
+        ax3.axvline(np.median(rt_filtered), color='orange', linestyle='--', linewidth=2, label='Median')
+        ax3.set_xlabel('Reaction Time [s]')
+        ax3.set_ylabel('Count')
+        ax3.set_title('RT Distribution')
+        ax3.legend()
+        sns.despine(ax=ax3)
+        
+        # RT vs trial number (check for fatigue/learning)
+        ax4 = fig.add_subplot(gs[1, 1])
+        trial_numbers = np.arange(len(rt_filtered))
+        ax4.scatter(trial_numbers, rt_filtered, alpha=0.3, s=20, c='darkgreen')
+        # Add moving average
+        window = min(50, len(rt_filtered) // 10)
+        if window > 1:
+            rt_ma = np.convolve(rt_filtered, np.ones(window)/window, mode='valid')
+            ax4.plot(np.arange(window//2, len(rt_filtered)-window//2+1), rt_ma, 
+                    'r-', linewidth=2, label=f'Moving avg (n={window})')
+        ax4.set_xlabel('Trial Number')
+        ax4.set_ylabel('RT [s]')
+        ax4.set_title('RT Over Time')
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+        sns.despine(ax=ax4)
+        
+        # Statistics table
+        ax5 = fig.add_subplot(gs[1, 2])
+        ax5.axis('off')
+        
+        # Calculate statistics
+        cv = np.std(rt_filtered) / np.mean(rt_filtered)
+        
+        stats_text = f"""
+        RT STATISTICS
+        {'='*30}
+        N trials:        {len(rt_filtered)}
+        
+        Mean RT:         {np.mean(rt_filtered):.4f} s
+        Std RT:          {np.std(rt_filtered):.4f} s
+        Median RT:       {np.median(rt_filtered):.4f} s
+        CV:              {cv:.4f}
+        
+        Min RT:          {np.min(rt_filtered):.4f} s
+        Max RT:          {np.max(rt_filtered):.4f} s
+        Range:           {np.ptp(rt_filtered):.4f} s
+        
+        TA RELATIONSHIP
+        {'='*30}
+        Correlation:     {r_value:.4f}
+        Slope:           {slope:.4f} s/s
+        Intercept:       {intercept:.4f} s
+        p-value:         {p_value:.2e}
+        """
+        
+        ax5.text(0.1, 0.9, stats_text, transform=ax5.transAxes,
+                fontsize=9, verticalalignment='top', 
+                fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.3))
+        
+        plt.tight_layout()
+        return fig
 
 
 def save_figure(fig: plt.Figure, 

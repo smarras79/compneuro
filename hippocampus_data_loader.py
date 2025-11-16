@@ -24,12 +24,12 @@ class HippocampusDataLoader:
         self.filepath = Path(filepath)
         self.data_dict = self._load_mat_file(filepath)
         
-        # Extract main fields
-        self.neur_tensor = self._get_array('neur_tensor_trialon')
+        # Extract main fields - try multiple possible names for neural tensor
+        self.neur_tensor = self._get_neural_tensor()
         self.cond_matrix = self._get_array('cond_matrix')
         
-        # Optional LFP data
-        self.lfp_tensor = self._get_array('lfp_tensor_trialon', required=False)
+        # Optional LFP data - try multiple possible names
+        self.lfp_tensor = self._get_lfp_tensor()
         
         # Validate data
         self._validate_data()
@@ -127,7 +127,7 @@ class HippocampusDataLoader:
         if field_name not in self.data_dict:
             if required:
                 available_fields = [k for k in self.data_dict.keys() 
-                                  if not k.startswith('__')]
+                                  if not k.startswith('__') and not k.startswith('#refs#')]
                 raise ValueError(f"Required field '{field_name}' not found in data file.\n"
                                f"Available fields: {available_fields}")
             return None
@@ -139,6 +139,81 @@ class HippocampusDataLoader:
             data = np.array(data)
         
         return data
+    
+    def _get_neural_tensor(self) -> np.ndarray:
+        """
+        Find and extract neural tensor from data, trying multiple possible field names.
+        
+        Returns:
+            Neural tensor array (neurons × time × trials)
+        """
+        # List of possible field names for neural data (in order of preference)
+        possible_names = [
+            'neur_tensor_trialon',
+            'neur_tensor_stim1on',
+            'neur_tensor_stim2on',
+            'neur_tensor_stimon',
+            'neur_tensor',
+            'neural_tensor',
+            'spikes',
+            'firing_rates'
+        ]
+        
+        # Try each possible name
+        for name in possible_names:
+            if name in self.data_dict:
+                print(f"✓ Found neural data field: '{name}'")
+                data = self.data_dict[name]
+                
+                # Ensure it's a numpy array
+                if not isinstance(data, np.ndarray):
+                    data = np.array(data)
+                
+                return data
+        
+        # If none found, raise error with helpful message
+        available_fields = [k for k in self.data_dict.keys() 
+                          if not k.startswith('__') and not k.startswith('#refs#')]
+        
+        raise ValueError(
+            f"Could not find neural tensor field in data file.\n"
+            f"Tried: {possible_names}\n"
+            f"Available fields: {available_fields}\n\n"
+            f"Please ensure your .mat file contains one of the expected field names,\n"
+            f"or modify the code to include your specific field name."
+        )
+    
+    def _get_lfp_tensor(self) -> Optional[np.ndarray]:
+        """
+        Find and extract LFP tensor if available.
+        
+        Returns:
+            LFP tensor array or None if not found
+        """
+        # List of possible field names for LFP data
+        possible_names = [
+            'lfp_tensor_trialon',
+            'lfp_tensor_stim1on',
+            'lfp_tensor_stim2on',
+            'lfp_tensor_stimon',
+            'lfp_tensor',
+            'lfp'
+        ]
+        
+        # Try each possible name
+        for name in possible_names:
+            if name in self.data_dict:
+                print(f"✓ Found LFP data field: '{name}'")
+                data = self.data_dict[name]
+                
+                # Ensure it's a numpy array
+                if not isinstance(data, np.ndarray):
+                    data = np.array(data)
+                
+                return data
+        
+        # LFP is optional, so return None if not found
+        return None
     
     def _validate_data(self):
         """Validate the loaded data has correct dimensions."""
@@ -174,6 +249,59 @@ class HippocampusDataLoader:
             HippocampusDataLoader instance
         """
         return cls(filepath)
+    
+    @staticmethod
+    def inspect_mat_file(filepath: str) -> Dict[str, Any]:
+        """
+        Inspect a MATLAB file and show available fields without loading full data.
+        
+        Args:
+            filepath: Path to .mat file
+            
+        Returns:
+            Dictionary with file information
+        """
+        filepath = Path(filepath)
+        if not filepath.exists():
+            raise FileNotFoundError(f"File not found: {filepath}")
+        
+        print(f"\nInspecting: {filepath.name}")
+        print("=" * 70)
+        
+        # Try loading with scipy first
+        try:
+            import scipy.io
+            mat = scipy.io.whosmat(str(filepath))
+            print(f"Format: MATLAB < v7.3 (readable by scipy)")
+            print(f"\nAvailable fields:")
+            for name, shape, dtype in mat:
+                if not name.startswith('__'):
+                    print(f"  {name:<30} shape={shape}  dtype={dtype}")
+            
+        except (NotImplementedError, ValueError):
+            # HDF5 format
+            print(f"Format: MATLAB v7.3 (HDF5)")
+            print(f"\nAvailable fields:")
+            
+            with h5py.File(filepath, 'r') as f:
+                def print_field(name, obj):
+                    if isinstance(obj, h5py.Dataset):
+                        if not name.startswith('#refs#'):
+                            print(f"  {name:<30} shape={obj.shape}  dtype={obj.dtype}")
+                
+                f.visititems(print_field)
+                
+                # Also print top-level
+                for key in f.keys():
+                    if isinstance(f[key], h5py.Dataset) and not key.startswith('#refs#'):
+                        print(f"  {key:<30} shape={f[key].shape}  dtype={f[key].dtype}")
+        
+        print("=" * 70)
+        
+        return {
+            'filepath': filepath,
+            'exists': True
+        }
     
     def summary(self) -> str:
         """Generate a summary of the loaded data."""
