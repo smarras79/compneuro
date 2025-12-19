@@ -30,26 +30,26 @@ class NeuralData:
 
     Attributes:
         neur_tensor: Neural firing rates (neurons × time × trials)
-                    Time bins: 1ms resolution, -500ms to +9500ms relative to start landmark
+                    Time bins: 1ms resolution (default: -500ms to +9500ms, but can vary)
         lfp_tensor: LFP data at 1kHz sampling (channels × time × trials)
         cond_matrix: Condition matrix (trials × condition_labels)
         condition_labels: Names of condition variables
+        time_vector: Optional time vector in milliseconds (auto-generated if None)
         n_neurons: Number of recorded neurons
         n_trials: Number of trials
         n_timepoints: Number of time points
-        time_vector: Time vector in milliseconds (relative to start landmark onset)
     """
     neur_tensor: np.ndarray
     lfp_tensor: np.ndarray
     cond_matrix: np.ndarray
     condition_labels: List[str]
     filename: str = ""
+    time_vector: Optional[np.ndarray] = None
 
     # Derived properties
     n_neurons: int = field(init=False)
     n_trials: int = field(init=False)
     n_timepoints: int = field(init=False)
-    time_vector: np.ndarray = field(init=False)
 
     def __post_init__(self):
         """Calculate derived properties after initialization."""
@@ -57,14 +57,43 @@ class NeuralData:
         self.n_timepoints = self.neur_tensor.shape[1]
         self.n_trials = self.neur_tensor.shape[2]
 
-        # Time vector: -500ms to +9500ms in 1ms bins
-        self.time_vector = np.arange(-500, 9501, 1)
+        # Generate time vector if not provided
+        if self.time_vector is None:
+            # Try to infer time vector from data shape
+            # Default assumption: 1ms bins, starting from -500ms
+            # But adjust if we have different number of timepoints
+            if self.n_timepoints == 10001:
+                # Standard case: -500ms to +9500ms
+                self.time_vector = np.arange(-500, 9501, 1)
+            else:
+                # Adaptive case: assume 1ms bins, center around 0 or start from -500
+                # Check if timepoints suggest a different range
+                if self.n_timepoints < 5000:
+                    # Likely a shorter epoch, center around 0
+                    start_time = -(self.n_timepoints // 2)
+                    self.time_vector = np.arange(start_time, start_time + self.n_timepoints, 1)
+                else:
+                    # Longer epoch, assume starts from -500
+                    self.time_vector = np.arange(-500, -500 + self.n_timepoints, 1)
+
+                warnings.warn(
+                    f"Generated time vector for {self.n_timepoints} points: "
+                    f"[{self.time_vector[0]}ms to {self.time_vector[-1]}ms]. "
+                    f"If this is incorrect, provide time_vector explicitly."
+                )
 
         # Validate dimensions
-        assert len(self.time_vector) == self.n_timepoints, \
-            f"Time vector length {len(self.time_vector)} doesn't match timepoints {self.n_timepoints}"
-        assert self.cond_matrix.shape[0] == self.n_trials, \
-            f"Condition matrix trials {self.cond_matrix.shape[0]} doesn't match neural data {self.n_trials}"
+        if len(self.time_vector) != self.n_timepoints:
+            raise ValueError(
+                f"Time vector length {len(self.time_vector)} doesn't match "
+                f"timepoints {self.n_timepoints}"
+            )
+
+        if self.cond_matrix.shape[0] != self.n_trials:
+            raise ValueError(
+                f"Condition matrix trials {self.cond_matrix.shape[0]} doesn't match "
+                f"neural data {self.n_trials}"
+            )
 
     def get_condition(self, label: str) -> np.ndarray:
         """
@@ -346,6 +375,28 @@ class HippocampusDataLoader:
                 )
                 condition_labels = HippocampusDataLoader.DEFAULT_CONDITION_LABELS[:cond_matrix.shape[1]]
 
+            # Try to load time vector from file
+            time_vector = None
+            time_ref_fields = ['stim1on', 'stim2on', 'trialon', 'time_vector', 'time']
+            for field_name in time_ref_fields:
+                if field_name in f:
+                    try:
+                        time_data = np.array(f[field_name])
+                        # If it's a scalar, it's a reference point, not the vector
+                        if time_data.ndim == 0 or (time_data.ndim == 1 and len(time_data) == 1):
+                            # Scalar reference point - use to generate time vector
+                            ref_point = float(time_data.flatten()[0]) if time_data.ndim > 0 else float(time_data)
+                            # Generate time vector relative to reference
+                            time_vector = np.arange(neur_tensor.shape[1]) - ref_point
+                            print(f"Generated time vector from reference '{field_name}' = {ref_point}")
+                        elif len(time_data) == neur_tensor.shape[1]:
+                            # It's the actual time vector
+                            time_vector = time_data
+                            print(f"Loaded time vector from '{field_name}'")
+                        break
+                    except Exception as e:
+                        print(f"Warning: Could not load time reference from '{field_name}': {e}")
+
             print(f"✓ Loaded {neur_tensor.shape[0]} neurons, "
                   f"{neur_tensor.shape[2]} trials, "
                   f"{neur_tensor.shape[1]} timepoints")
@@ -356,6 +407,7 @@ class HippocampusDataLoader:
                 lfp_tensor=lfp_tensor,
                 cond_matrix=cond_matrix,
                 condition_labels=condition_labels,
+                time_vector=time_vector,
                 filename=filepath.name
             )
 
@@ -443,7 +495,23 @@ class HippocampusDataLoader:
 
             # Use provided labels or defaults
             if condition_labels is None:
-                condition_labels = HippocampusDataLoader.DEFAULT_CONDITION_LABELS[:cond_matrix.shape[1]]
+                # Try to load from cond_label field
+                if 'cond_label' in mat_data:
+                    try:
+                        cond_label_data = mat_data['cond_label']
+                        # Handle different formats
+                        if isinstance(cond_label_data, np.ndarray):
+                            loaded_labels = [str(label[0]) if isinstance(label, np.ndarray) else str(label)
+                                           for label in cond_label_data.flatten()]
+                            condition_labels = loaded_labels[:cond_matrix.shape[1]]
+                            print(f"Loaded condition labels from file: {condition_labels}")
+                        else:
+                            condition_labels = HippocampusDataLoader.DEFAULT_CONDITION_LABELS[:cond_matrix.shape[1]]
+                    except Exception as e:
+                        print(f"Warning: Could not load condition labels: {e}")
+                        condition_labels = HippocampusDataLoader.DEFAULT_CONDITION_LABELS[:cond_matrix.shape[1]]
+                else:
+                    condition_labels = HippocampusDataLoader.DEFAULT_CONDITION_LABELS[:cond_matrix.shape[1]]
 
             # Ensure we have the right number of labels
             if len(condition_labels) != cond_matrix.shape[1]:
@@ -452,6 +520,28 @@ class HippocampusDataLoader:
                     f"condition matrix columns ({cond_matrix.shape[1]}). Using defaults."
                 )
                 condition_labels = HippocampusDataLoader.DEFAULT_CONDITION_LABELS[:cond_matrix.shape[1]]
+
+            # Try to load time vector from file
+            time_vector = None
+            time_ref_fields = ['stim1on', 'stim2on', 'trialon', 'time_vector', 'time']
+            for field_name in time_ref_fields:
+                if field_name in mat_data:
+                    try:
+                        time_data = mat_data[field_name]
+                        # If it's a scalar, it's a reference point, not the vector
+                        if time_data.size == 1:
+                            # Scalar reference point - use to generate time vector
+                            ref_point = float(time_data.flatten()[0])
+                            # Generate time vector relative to reference
+                            time_vector = np.arange(neur_tensor.shape[1]) - ref_point
+                            print(f"Generated time vector from reference '{field_name}' = {ref_point}")
+                        elif len(time_data.flatten()) == neur_tensor.shape[1]:
+                            # It's the actual time vector
+                            time_vector = time_data.flatten()
+                            print(f"Loaded time vector from '{field_name}'")
+                        break
+                    except Exception as e:
+                        print(f"Warning: Could not load time reference from '{field_name}': {e}")
 
             print(f"✓ Loaded {neur_tensor.shape[0]} neurons, "
                   f"{neur_tensor.shape[2]} trials, "
@@ -463,6 +553,7 @@ class HippocampusDataLoader:
                 lfp_tensor=lfp_tensor,
                 cond_matrix=cond_matrix,
                 condition_labels=condition_labels,
+                time_vector=time_vector,
                 filename=filepath.name
             )
 
