@@ -306,22 +306,49 @@ class HippocampusDataLoader:
             # HDF5 stores arrays in transposed form compared to scipy.io.loadmat
             neur_tensor_h5 = f[neur_tensor_field]
             neur_tensor = np.array(neur_tensor_h5)
+            print(f"Raw neural tensor shape from HDF5: {neur_tensor.shape}")
 
-            # Check if we need to transpose (HDF5 often stores in Fortran order)
-            # Expected shape: (neurons × time × trials)
-            if neur_tensor.ndim == 3:
-                # HDF5 typically stores as (trials × time × neurons), need to transpose
-                if neur_tensor.shape[0] < neur_tensor.shape[2]:
-                    # Likely needs transpose
-                    neur_tensor = np.transpose(neur_tensor, (2, 1, 0))
-
-            # Load condition matrix
+            # Load condition matrix first to determine number of trials
             cond_matrix_h5 = f['cond_matrix']
             cond_matrix = np.array(cond_matrix_h5)
+            print(f"Raw condition matrix shape from HDF5: {cond_matrix.shape}")
 
-            # Transpose if needed (HDF5 stores as columns × rows)
+            # Transpose condition matrix if needed (HDF5 stores as columns × rows)
             if cond_matrix.ndim == 2 and cond_matrix.shape[0] < cond_matrix.shape[1]:
                 cond_matrix = cond_matrix.T
+                print(f"Transposed condition matrix to: {cond_matrix.shape}")
+
+            # Determine number of trials from condition matrix
+            n_trials_expected = cond_matrix.shape[0]
+            print(f"Expected number of trials from condition matrix: {n_trials_expected}")
+
+            # Transpose neural tensor to match expected shape: (neurons × time × trials)
+            # HDF5 typically stores as (trials × time × neurons) in Fortran order
+            if neur_tensor.ndim == 3:
+                # Check which dimension matches n_trials
+                if neur_tensor.shape[0] == n_trials_expected:
+                    # Format: (trials × time × neurons) -> need (neurons × time × trials)
+                    neur_tensor = np.transpose(neur_tensor, (2, 1, 0))
+                    print(f"Transposed neural tensor from (trials × time × neurons) to: {neur_tensor.shape}")
+                elif neur_tensor.shape[2] == n_trials_expected:
+                    # Format: (neurons × time × trials) - already correct
+                    print(f"Neural tensor already in correct format: {neur_tensor.shape}")
+                else:
+                    # Try to infer based on dimension sizes
+                    # Smallest dimension is usually trials
+                    min_dim = np.argmin(neur_tensor.shape)
+                    if min_dim == 0 and neur_tensor.shape[0] < 100:
+                        # (trials × time × neurons)
+                        neur_tensor = np.transpose(neur_tensor, (2, 1, 0))
+                        print(f"Inferred transpose from (trials × time × neurons) to: {neur_tensor.shape}")
+                    elif min_dim == 2 and neur_tensor.shape[2] < 100:
+                        # Already (neurons × time × trials)
+                        print(f"Neural tensor appears correct: {neur_tensor.shape}")
+                    else:
+                        warnings.warn(
+                            f"Could not reliably determine neural tensor orientation. "
+                            f"Shape: {neur_tensor.shape}, Expected trials: {n_trials_expected}"
+                        )
 
             # Load LFP if available (try multiple possible names)
             lfp_field = None
