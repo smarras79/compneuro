@@ -63,13 +63,17 @@ class NeuralVisualizer:
     @staticmethod
     def plot_temporal_tuning(tuning_results: Dict[str, Any],
                             n_neurons: int = 12,
+                            sort_by: str = 'tmi',
+                            min_tmi: Optional[float] = None,
                             figsize: tuple = (15, 10)) -> plt.Figure:
         """
         Plot temporal tuning curves for top neurons.
         
         Args:
             tuning_results: Output from TemporalCodingAnalyzer
-            n_neurons: Number of neurons to plot
+            n_neurons: Number of neurons to plot (default: 12)
+            sort_by: How to select neurons ('tmi', 'info', 'peak_time')
+            min_tmi: Optional minimum TMI threshold (only plot neurons above this)
             figsize: Figure size
             
         Returns:
@@ -78,13 +82,44 @@ class NeuralVisualizer:
         tuning_curves = tuning_results['tuning_curves']
         time_vec = tuning_results['time_vector']
         tmi = tuning_results['tmi']
+        temporal_info = tuning_results['temporal_info']
         
-        # Select top neurons by TMI
-        top_idx = np.argsort(tmi)[-n_neurons:]
+        # Select top neurons based on criterion
+        if sort_by == 'tmi':
+            scores = tmi
+            score_name = 'TMI'
+        elif sort_by == 'info':
+            scores = temporal_info
+            score_name = 'Info'
+        elif sort_by == 'peak_time':
+            scores = np.abs(tuning_results['peak_times_ms'] - np.median(tuning_results['peak_times_ms']))
+            score_name = 'Peak'
+        else:
+            scores = tmi
+            score_name = 'TMI'
+        
+        # Sort and select top neurons
+        sorted_idx = np.argsort(scores)[::-1]  # Descending order
+        
+        # Apply minimum TMI threshold if specified
+        if min_tmi is not None:
+            valid_mask = tmi[sorted_idx] >= min_tmi
+            top_idx = sorted_idx[valid_mask][:n_neurons]
+            if len(top_idx) < n_neurons:
+                print(f"  Note: Only {len(top_idx)} neurons have TMI >= {min_tmi}")
+        else:
+            top_idx = sorted_idx[:n_neurons]
+        
+        n_to_plot = len(top_idx)
         
         # Create subplots
-        n_rows = int(np.ceil(n_neurons / 3))
+        n_rows = int(np.ceil(n_to_plot / 3))
         fig, axes = plt.subplots(n_rows, 3, figsize=figsize)
+        
+        # Handle case where only one row
+        if n_rows == 1:
+            axes = axes.reshape(1, -1)
+        
         axes = axes.flatten()
         
         for i, neuron_idx in enumerate(top_idx):
@@ -92,15 +127,25 @@ class NeuralVisualizer:
             ax.plot(time_vec, tuning_curves[neuron_idx, :], 'k-', linewidth=2)
             ax.fill_between(time_vec, 0, tuning_curves[neuron_idx, :], alpha=0.3)
             
-            ax.set_xlabel('Time (ms)')
-            ax.set_ylabel('Firing Rate (Hz)')
-            ax.set_title(f'Neuron {neuron_idx} (TMI={tmi[neuron_idx]:.2f})')
+            ax.set_xlabel('Time (ms)', fontsize=9)
+            ax.set_ylabel('Firing Rate (Hz)', fontsize=9)
+            
+            # Title with multiple metrics
+            title = f'Neuron {neuron_idx}\n'
+            title += f'TMI={tmi[neuron_idx]:.2f}, Info={temporal_info[neuron_idx]:.2f}bits'
+            ax.set_title(title, fontsize=9)
+            
             ax.grid(True, alpha=0.3)
             sns.despine(ax=ax)
         
         # Hide unused subplots
-        for i in range(len(top_idx), len(axes)):
+        for i in range(n_to_plot, len(axes)):
             axes[i].axis('off')
+        
+        # Add overall title
+        fig.suptitle(f'Top {n_to_plot} Neurons by {score_name}\n'
+                    f'(out of {tuning_results["n_neurons"]} total neurons)',
+                    fontsize=14, y=0.995)
         
         plt.tight_layout()
         return fig

@@ -1,388 +1,447 @@
-# Hippocampus Neural Data Analysis Pipeline
+# Condition-Specific Firing Rate Analysis Toolkit
 
-A comprehensive Python toolkit for analyzing neural activity from hippocampal recordings during mental navigation tasks in primates. This pipeline uses advanced AI and machine learning techniques to decode behavioral states, identify time cells, analyze population dynamics, and detect sequential activity patterns.
+Python toolkit for analyzing neural firing rates with multi-condition filtering and smoothing, designed to replicate and extend MATLAB analysis workflows (e.g., `sujay_example_zoom.m`).
 
-## 🎯 Overview
+## Overview
 
-This analysis suite is designed for neural data from experiments where animals mentally navigate between landmarks using learned sequences. The toolkit provides:
+This toolkit provides:
 
-* **✅ MATLAB v7.3 Support**: Robust `.mat` file reader with automatic format detection (old MATLAB and HDF5/v7.3)
-* **⏱️ Temporal Coding Analysis**: Time cell identification and temporal tuning characterization
-* **🧠 Machine Learning Decoding**: Multiple ML algorithms to decode landmark pairs and temporal distances
-* **📊 Dimensionality Reduction**: PCA, ICA, t-SNE, and UMAP for neural manifold analysis
-* **🔄 Sequence Detection**: Algorithms to identify sequential neural activity patterns
-* **📈 Publication-Quality Visualizations**: Comprehensive plotting tools for all analyses
+1. **Multi-condition trial filtering** - Filter trials based on multiple condition matrix columns
+2. **Firing rate extraction** - Extract neural data for specific neurons and trial subsets
+3. **Smoothing with moving average** - Convolutional smoothing matching MATLAB's `conv()` function
+4. **Flexible visualization** - Plot firing rates with customizable styling
+5. **Pipeline integration** - Easy integration with existing analysis pipelines
 
-## 📦 Installation
+## Files
 
-### Prerequisites
+### Core Module
+- **`firing_rate_analyzer.py`** - Main analysis class with all functionality
 
-* Python 3.7 or higher
-* pip package manager
+### Examples
+- **`matlab_replication.py`** - Standalone script that exactly replicates MATLAB analysis
+- **`integration_example.py`** - Shows how to integrate into existing pipelines
+- **`demo_usage.py`** - Simple demonstration with synthetic data
 
-### Quick Setup
+### Your Existing Files
+- **`example_analysis.py`** - Your comprehensive hippocampus analysis pipeline
+- **`sujay_example_zoom.m`** - Original MATLAB code for reference
 
-1. **Clone or download this repository**:
-   ```bash
-   cd /path/to/compneuro
-   ```
+## Quick Start
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### 1. Standalone MATLAB Replication
 
-3. **Test installation**:
-   ```bash
-   python test_installation.py
-   ```
-
-   You should see:
-   ```
-   ✓ All required dependencies are installed!
-   ✓ All custom modules loaded successfully!
-   ✓ INSTALLATION SUCCESSFUL!
-   ```
-
-## 🚀 Quick Start
-
-### Analyze a Single File
+Replicate the exact MATLAB analysis:
 
 ```bash
-python example_analysis.py data/amadeus01172020_a_neur_tensor_joyon.mat
+python matlab_replication.py /path/to/your_data.mat
 ```
 
 This will:
-1. ✅ Load the neural data (automatically detects MATLAB v7.3 format)
-2. 📊 Filter for mental navigation trials
-3. 🔬 Perform all analyses
-4. 📈 Generate visualizations
-5. 💾 Save results to `results/amadeus01172020_a_neur_tensor_joyon/`
+- Plot TA vs TP for two attention conditions (behavioral data)
+- Extract and plot smoothed firing rates for 3 specific condition/neuron combinations
+- Save all plots to `matlab_replication_results/`
 
-### Analyze Multiple Files
-
-Process all `.mat` files in a directory:
-
-```bash
-python example_analysis.py data/ --pattern "*.mat" --output results/
-```
-
-### Custom Output Directory
-
-```bash
-python example_analysis.py data/session1.mat --output my_results/
-```
-
-## 📁 Data Structure
-
-The pipeline expects `.mat` files with the following structure:
-
-### Required Fields
-
-* **`neur_tensor_trialon`**: Neural firing rates
-  + Shape: `(neurons × time × trials)`
-  + Time bins: 1ms
-  + Time range: -500ms to +9500ms relative to start landmark onset
-  + Units: spikes/second (Hz)
-
-* **`cond_matrix`**: Condition matrix
-  + Shape: `(trials × condition_labels)`
-  + Each row represents one trial
-  + Columns contain experimental parameters
-
-### Optional Fields
-
-* **`lfp_tensor_trialon`**: Local field potential data
-  + Shape: `(channels × time × trials)`
-  + Sampling rate: 1kHz
-
-### Condition Labels (cond_matrix columns)
-
-| Column | Label | Description |
-|--------|-------|-------------|
-| 0 | `ta` | True temporal distance (seconds) |
-| 1 | `tp` | Produced temporal distance by animal (seconds) |
-| 2 | `curr` | Start landmark (1-6) |
-| 3 | `target` | Target landmark (1-6) |
-| 4 | `trial_type` | 1=visible, 2=sequence occluded, 3=fully occluded |
-| 5 | `seqq` | Sequence identity (1,2=normal, 3=slower) |
-| 6 | `succ` | Success flag (1/0) |
-| 7 | `validtrials_mm` | Valid trials via mixture model |
-| 8 | `attempt` | Trial attempt number |
-
-## 📚 Modules
-
-### 1. Data Loader (`hippocampus_data_loader.py`)
-
-Load and preprocess neural data from `.mat` files with **automatic MATLAB v7.3 detection**.
+### 2. Use with Your Data
 
 ```python
-from hippocampus_data_loader import HippocampusDataLoader
+from firing_rate_analyzer import FiringRateAnalyzer
+import numpy as np
 
-# Load data (works with both old MATLAB and v7.3 formats!)
-data = HippocampusDataLoader.load_mat_file('session1.mat')
+# Load your data (neural_tensor, cond_matrix, time_edges)
+# neural_tensor shape: (n_neurons, n_timebins, n_trials)
+# cond_matrix shape: (n_trials, n_conditions)
+# time_edges shape: (n_timebins,)
 
-# View summary
-print(data.summary())
+# Define conditions to analyze
+conditions_list = [
+    {9: 1, 2: 1, 3: 4},  # Column 9==1 AND column 2==1 AND column 3==4
+    {9: 1, 2: 1, 3: 5},  # Column 9==1 AND column 2==1 AND column 3==5
+]
 
+neuron_indices = [0, 1]  # Which neurons to analyze
+
+# Run analysis
+results = FiringRateAnalyzer.analyze_condition_specific_firing(
+    neural_tensor=neural_tensor,
+    cond_matrix=cond_matrix,
+    time_edges=time_edges,
+    conditions_list=conditions_list,
+    neuron_indices=neuron_indices,
+    window_size=300,
+    average=True
+)
+
+# Plot results
+fig = FiringRateAnalyzer.plot_condition_specific_firing(
+    results,
+    labels=['Condition A', 'Condition B'],
+    colors=['blue', 'orange'],
+    add_vertical_lines=[0]  # Mark event onset
+)
+```
+
+### 3. Integrate into Existing Pipeline
+
+Add to your `example_analysis.py` after data loading:
+
+```python
+from firing_rate_analyzer import FiringRateAnalyzer
+
+# ... (your existing data loading code) ...
+
+# Add condition-specific firing rate analysis
+print("\n" + "-"*70)
+print("CONDITION-SPECIFIC FIRING RATE ANALYSIS")
+print("-"*70)
+
+# Replicate MATLAB analysis
+matlab_results = FiringRateAnalyzer.replicate_matlab_example(
+    neural_tensor=data.stim1on['neur_tensor'],
+    cond_matrix=data.cond_matrix,
+    time_edges=data.stim1on['edges'],
+    window_size=300
+)
+
+# Plot and save
+fig = FiringRateAnalyzer.plot_condition_specific_firing(
+    matlab_results,
+    labels=[f"Trace {i+1}" for i in range(3)],
+    title="Smoothed Firing Rates"
+)
+fig.savefig(session_dir / 'firing_rates_matlab_style.png', dpi=300)
+```
+
+## API Reference
+
+### `FiringRateAnalyzer` Class
+
+#### `filter_trials_multi_condition(cond_matrix, conditions)`
+Filter trials based on multiple condition matrix columns.
+
+**Parameters:**
+- `cond_matrix`: np.ndarray, shape (n_trials, n_conditions)
+- `conditions`: dict, mapping column index to value(s)
+  - Single value: `{9: 1}` means column 9 == 1
+  - Multiple values: `{3: [4, 5]}` means column 3 in [4, 5]
+  - Combined: `{9: 1, 2: 1, 3: [4, 5]}` means ALL conditions must be met
+
+**Returns:**
+- Boolean mask of shape (n_trials,)
+
+**Example:**
+```python
+# Filter for trials where:
+# - column 9 == 1 (attention condition 1)
+# - column 2 == 1 (some task parameter)
+# - column 3 is either 4 or 5 (temporal distance options)
+conditions = {9: 1, 2: 1, 3: [4, 5]}
+mask = FiringRateAnalyzer.filter_trials_multi_condition(cond_matrix, conditions)
+print(f"Selected {np.sum(mask)} trials")
+```
+
+#### `extract_firing_rates(neural_tensor, neuron_idx, trial_indices)`
+Extract firing rates for specific neuron and trials.
+
+**Parameters:**
+- `neural_tensor`: np.ndarray, shape (n_neurons, n_timebins, n_trials)
+- `neuron_idx`: int, neuron index (0-indexed)
+- `trial_indices`: np.ndarray, boolean mask or integer indices
+
+**Returns:**
+- Firing rates, shape (n_timebins, n_selected_trials)
+
+#### `smooth_firing_rates(firing_rates, window_size=300, axis=0)`
+Apply moving average smoothing (convolution).
+
+**Parameters:**
+- `firing_rates`: np.ndarray, shape (n_timebins, n_trials) or (n_timebins,)
+- `window_size`: int, smoothing window size in samples
+- `axis`: int, axis to smooth along (0 for time)
+
+**Returns:**
+- Smoothed firing rates (trimmed to valid convolution region)
+
+**Note:** This replicates MATLAB's `conv(signal, ones(N,1), 'valid')`
+
+#### `analyze_condition_specific_firing(...)`
+Comprehensive analysis pipeline.
+
+**Parameters:**
+- `neural_tensor`: Neural data, shape (n_neurons, n_timebins, n_trials)
+- `cond_matrix`: Condition matrix, shape (n_trials, n_conditions)
+- `time_edges`: Time bin edges, shape (n_timebins,)
+- `conditions_list`: List of condition dictionaries (one per trace)
+- `neuron_indices`: List of neuron indices (one per trace)
+- `window_size`: Smoothing window size (default: 300)
+- `average`: If True, average across trials; if False, return all trials
+
+**Returns:**
+- Dictionary with:
+  - `'firing_rates_raw'`: List of raw firing rates
+  - `'firing_rates_smooth'`: List of smoothed firing rates
+  - `'time_vector'`: Trimmed time vector for plotting
+  - `'n_trials'`: Number of trials per condition
+  - `'trial_masks'`: Boolean masks for each condition
+
+#### `plot_condition_specific_firing(results, ...)`
+Visualize firing rate analysis results.
+
+**Parameters:**
+- `results`: Output from `analyze_condition_specific_firing()`
+- `labels`: List of labels for each trace (optional)
+- `colors`: List of colors for each trace (optional)
+- `title`: Plot title
+- `xlabel`, `ylabel`: Axis labels
+- `figsize`: Figure size tuple
+- `add_vertical_lines`: List of x-positions for vertical lines (e.g., [0] for event onset)
+
+**Returns:**
+- Matplotlib figure
+
+#### `replicate_matlab_example(...)`
+Exactly replicate the sujay_example_zoom.m analysis.
+
+**Parameters:**
+- `neural_tensor`: Neural data from stim1on event
+- `cond_matrix`: Condition matrix
+- `time_edges`: Time bin edges
+- `window_size`: Smoothing window (default: 300)
+
+**Returns:**
+- Analysis results dictionary (same format as `analyze_condition_specific_firing`)
+
+**What it does:**
+- Extracts 3 traces matching MATLAB code:
+  1. Neuron 0, conditions: col9==1, col2==1, col3==4
+  2. Neuron 0, conditions: col9==1, col2==1, col3==5
+  3. Neuron 2, conditions: col9==1, col2==1, col3==2
+- Averages trials and applies 300-sample smoothing
+
+## Detailed Examples
+
+### Example 1: Compare Different Neurons for Same Condition
+
+```python
+# Analyze first 5 neurons for mental navigation trials
+conditions = {9: 1, 10: 3}  # Mental navigation condition
+results = FiringRateAnalyzer.analyze_condition_specific_firing(
+    neural_tensor=neural_tensor,
+    cond_matrix=cond_matrix,
+    time_edges=time_edges,
+    conditions_list=[conditions] * 5,
+    neuron_indices=[0, 1, 2, 3, 4],
+    window_size=300
+)
+
+fig = FiringRateAnalyzer.plot_condition_specific_firing(
+    results,
+    labels=[f"Neuron {i+1}" for i in range(5)],
+    title="Population Response - Mental Navigation"
+)
+```
+
+### Example 2: Compare Same Neuron Across Conditions
+
+```python
+# Compare attention conditions for best time cell
+neuron_idx = 5  # Your best time cell
+
+conditions_list = [
+    {9: 1},   # Attention condition 1
+    {11: 1},  # Attention condition 2
+]
+
+results = FiringRateAnalyzer.analyze_condition_specific_firing(
+    neural_tensor=neural_tensor,
+    cond_matrix=cond_matrix,
+    time_edges=time_edges,
+    conditions_list=conditions_list,
+    neuron_indices=[neuron_idx, neuron_idx],
+    window_size=300
+)
+
+fig = FiringRateAnalyzer.plot_condition_specific_firing(
+    results,
+    labels=['Attend Left', 'Attend Right'],
+    colors=['blue', 'red'],
+    title=f"Neuron {neuron_idx+1}: Attention Modulation"
+)
+```
+
+### Example 3: Time-Dependent Analysis
+
+```python
+# Analyze different temporal distances
+ta_values = [0.5, 1.0, 1.5, 2.0]  # seconds
+
+conditions_list = []
+for ta_val in ta_values:
+    # Find trials with this TA value (with tolerance)
+    conditions_list.append({0: ta_val})  # Assuming column 0 is TA
+
+results = FiringRateAnalyzer.analyze_condition_specific_firing(
+    neural_tensor=neural_tensor,
+    cond_matrix=cond_matrix,
+    time_edges=time_edges,
+    conditions_list=conditions_list,
+    neuron_indices=[0] * len(ta_values),  # Same neuron
+    window_size=300
+)
+
+fig = FiringRateAnalyzer.plot_condition_specific_firing(
+    results,
+    labels=[f"TA={ta:.1f}s" for ta in ta_values],
+    title="Temporal Distance Coding"
+)
+```
+
+### Example 4: Extract Individual Trials (No Averaging)
+
+```python
+# Get all individual trial traces
+conditions = {9: 1, 2: 1, 3: 4}
+
+results = FiringRateAnalyzer.analyze_condition_specific_firing(
+    neural_tensor=neural_tensor,
+    cond_matrix=cond_matrix,
+    time_edges=time_edges,
+    conditions_list=[conditions],
+    neuron_indices=[0],
+    window_size=100,
+    average=False  # Return all trials
+)
+
+# Results will contain (n_timebins, n_trials) array
+firing_rates_all_trials = results['firing_rates_smooth'][0]
+print(f"Shape: {firing_rates_all_trials.shape}")
+
+# Now you can analyze trial-to-trial variability
+```
+
+## Understanding the MATLAB Replication
+
+The MATLAB code (`sujay_example_zoom.m`) does:
+
+```matlab
+% Filter trials: column 10==1 AND column 3==1 AND column 4==4
+trid = find(cond_matrix(:,10)==1 & cond_matrix(:,3)==1 & cond_matrix(:,4)==4);
+
+% Extract neuron 1, all time bins, selected trials
+fr3 = squeeze(neur_tensor_stim1on(1,:,trid));
+
+% Average across trials
+mean_fr3 = mean(fr3, 2);
+
+% Smooth with 300-sample moving average
+smoothed = conv(mean_fr3, ones(300,1), 'valid');
+
+% Plot with trimmed time vector
+plot(stim1on.edges(150:end-150), smoothed);
+```
+
+The Python equivalent:
+
+```python
 # Filter trials
-mental_nav_trials = data.get_mental_navigation_trials()
-success_trials = data.filter_trials(succ=1, trial_type=3)
+trid = (cond_matrix[:, 9]==1) & (cond_matrix[:, 2]==1) & (cond_matrix[:, 3]==4)
 
-# Extract neural activity
-activity = data.get_neural_activity(
-    trial_mask=mental_nav_trials,
-    time_window=(0, 3000)  # ms
-)
+# Extract neuron 0 (0-indexed)
+fr3 = neur_tensor[0, :, trid]
+
+# Average across trials
+mean_fr3 = np.mean(fr3, axis=1)
+
+# Smooth with convolution
+kernel = np.ones(300)
+smoothed = np.convolve(mean_fr3, kernel, mode='valid')
+
+# Trimmed time vector
+trim = 150
+time_trimmed = edges[trim:-trim]
+
+# Plot
+plt.plot(time_trimmed, smoothed)
 ```
 
-**Key Features:**
-- ✅ Automatic detection of MATLAB format (old vs v7.3)
-- ✅ Handles HDF5-based MATLAB v7.3 files
-- ✅ Proper array transposition for HDF5 format
-- ✅ Comprehensive data validation
-
-### 2. AI-Powered Analysis (`neural_analysis_ai.py`)
-
-#### Temporal Coding Analysis
+Or using the toolkit:
 
 ```python
-from neural_analysis_ai import TemporalCodingAnalyzer
-
-analyzer = TemporalCodingAnalyzer()
-
-# Compute temporal tuning curves
-tuning = analyzer.compute_temporal_tuning(
-    neural_data=data,
-    trial_mask=mental_nav_trials,
-    time_window=(0, 3000),
-    smooth_sigma=50.0
+conditions = {9: 1, 2: 1, 3: 4}
+results = FiringRateAnalyzer.analyze_condition_specific_firing(
+    neural_tensor, cond_matrix, edges,
+    conditions_list=[conditions],
+    neuron_indices=[0],
+    window_size=300
 )
-
-# Identify time cells
-time_cells = analyzer.identify_time_cells(
-    tuning,
-    tmi_threshold=0.3,
-    info_threshold=0.1
-)
+FiringRateAnalyzer.plot_condition_specific_firing(results)
 ```
 
-#### Population Decoding
+## Tips and Best Practices
 
-```python
-from neural_analysis_ai import PopulationDecoder
+1. **Condition Matrix Indexing**
+   - MATLAB uses 1-based indexing: column 1, 2, 3...
+   - Python uses 0-based indexing: column 0, 1, 2...
+   - Remember to subtract 1 when converting MATLAB column numbers!
 
-# Decode landmark pairs
-decoder = PopulationDecoder(method='random_forest')
-results = decoder.decode_landmark_pairs(
-    neural_data=data,
-    trial_mask=mental_nav_trials,
-    time_window=(500, 2000),
-    cv_folds=5
-)
+2. **Window Size Selection**
+   - Larger windows (300-500): Smoother, better for slow dynamics
+   - Smaller windows (50-100): More temporal detail, noisier
+   - Typical: 100-300 samples depending on your bin size
 
-print(f"Accuracy: {results['accuracy']:.3f}")
-```
+3. **Trial Averaging**
+   - `average=True`: Get mean response (less noisy, easier interpretation)
+   - `average=False`: Keep all trials (analyze variability, single-trial decoding)
 
-**Available methods:** `'bayesian'`, `'svm'`, `'random_forest'`, `'logistic'`, `'mlp'`
+4. **Computational Efficiency**
+   - Filter trials once, reuse mask for multiple neurons
+   - Use `average=True` when possible (faster)
+   - Pre-allocate arrays for batch processing
 
-#### Neural Manifold Analysis
+5. **Visualization**
+   - Add vertical lines at key events (stimulus onset, choice time)
+   - Use consistent colors across related plots
+   - Include trial counts in labels for transparency
 
-```python
-from neural_analysis_ai import NeuralManifoldAnalyzer
+## Troubleshooting
 
-analyzer = NeuralManifoldAnalyzer(method='pca', n_components=10)
-manifold = analyzer.fit_transform(
-    neural_data=data,
-    trial_mask=mental_nav_trials,
-    time_window=(0, 3000)
-)
-```
+**Problem:** "No trials found for conditions"
+- Check your condition matrix has the expected columns
+- Verify condition values are correct (print unique values)
+- Try relaxing conditions (remove some constraints)
 
-**Available methods:** `'pca'`, `'ica'`, `'tsne'`, `'umap'`, `'nmf'`
+**Problem:** Smoothed traces look weird
+- Check window size isn't too large for your data
+- Verify time edges match neural tensor dimensions
+- Ensure firing rates aren't all zeros
 
-#### Sequence Analysis
+**Problem:** Index errors
+- Remember Python is 0-indexed, MATLAB is 1-indexed
+- Check neural_tensor shape matches expectations
+- Verify neuron_indices are within valid range
 
-```python
-from neural_analysis_ai import SequenceAnalyzer
+**Problem:** Different results from MATLAB
+- Verify exact condition filtering logic
+- Check array axis conventions (time along axis 1 in tensor)
+- Ensure same smoothing window and convolution mode
 
-analyzer = SequenceAnalyzer()
-sequences = analyzer.detect_sequences(
-    neural_data=data,
-    trial_mask=mental_nav_trials,
-    time_window=(0, 3000)
-)
-```
+## Contributing
 
-### 3. Visualization (`neural_visualization.py`)
+Feel free to extend this toolkit with:
+- Additional smoothing methods (Gaussian, Savitzky-Golay)
+- Statistical comparison functions
+- More sophisticated trial selection criteria
+- Population-level analyses
 
-Generate publication-quality figures:
+## License
 
-```python
-from neural_visualization import NeuralVisualizer, save_figure
+MIT License - free to use and modify
 
-# Temporal tuning curves
-fig = NeuralVisualizer.plot_temporal_tuning(tuning, n_neurons=12)
-save_figure(fig, 'tuning_curves.png')
+## Contact
 
-# Population heatmap
-fig = NeuralVisualizer.plot_population_heatmap(
-    activity=mean_activity,
-    time_vector=time_vec,
-    sort_by='peak'
-)
-
-# Decoding results
-fig = NeuralVisualizer.plot_decoding_results(decoding_results)
-
-# 3D neural trajectories
-fig = NeuralVisualizer.plot_3d_trajectory(
-    manifold_results,
-    condition_labels=landmark_pairs
-)
-```
-
-## 📊 Output Files
-
-The analysis pipeline generates:
-
-### Figures (PNG, 300 DPI)
-- `temporal_tuning_curves.png` - Tuning curves of top neurons
-- `population_heatmap.png` - Population activity sorted by peak time
-- `time_cells_summary.png` - Time cell identification statistics
-- `decoding_random_forest.png` - Decoding performance
-- `pca_variance.png` - PCA variance explained
-- `neural_trajectories_3d.png` - 3D neural state space
-- `sequence_analysis.png` - Sequential activity patterns
-
-### Text Files
-- `analysis_summary.txt` - Summary statistics and key findings
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-**Issue:** `Error loading data: Please use HDF reader for matlab v7.3 files`
-- **Solution:** This is now automatically handled! The new loader detects v7.3 format and uses h5py. Make sure you've installed all requirements: `pip install -r requirements.txt`
-
-**Issue:** `ModuleNotFoundError: No module named 'h5py'`
-- **Solution:** Install h5py: `pip install h5py`
-
-**Issue:** `FileNotFoundError: No files matching '*.mat'`
-- **Solution:** Check that your data files are in the specified directory
-
-**Issue:** `ValueError: Missing required fields`
-- **Solution:** Ensure your `.mat` file contains `neur_tensor_trialon` and `cond_matrix`
-
-**Issue:** `Warning: Some classes have fewer samples than CV folds`
-- **Solution:** This is normal for rare landmark pairs. The code automatically adjusts CV folds.
-
-## 🎓 Complete Analysis Pipeline
-
-The `example_analysis.py` script performs:
-
-1. ✅ **Data Loading** - Load and validate .mat file (any MATLAB version)
-2. 🎯 **Trial Filtering** - Extract mental navigation trials
-3. ⏱️ **Temporal Coding** - Compute tuning curves and identify time cells
-4. 🧠 **Population Decoding** - Decode landmark pairs and temporal distances
-5. 📊 **Manifold Analysis** - PCA and 3D trajectory visualization
-6. 🔄 **Sequence Detection** - Identify sequential activation patterns
-7. 📈 **Visualization** - Generate all plots
-8. 📝 **Summary Report** - Save key findings
-
-## 📖 Advanced Usage
-
-### Custom Trial Filtering
-
-```python
-# Multiple conditions
-custom_trials = data.filter_trials(
-    trial_type=3,      # Fully occluded
-    seqq='<3',        # Normal speed
-    succ=1,           # Successful only
-    curr=1,           # Specific start landmark
-    target='!=1'      # Target not equal to start
-)
-```
-
-### Batch Processing
-
-```python
-from pathlib import Path
-import pandas as pd
-
-results_list = []
-
-for mat_file in Path('data/').glob('*.mat'):
-    data = HippocampusDataLoader.load_mat_file(mat_file)
-    # ... analyze ...
-    results_list.append({
-        'session': mat_file.stem,
-        'n_neurons': data.n_neurons,
-        'n_time_cells': np.sum(time_cells)
-    })
-
-df = pd.DataFrame(results_list)
-df.to_csv('session_summary.csv')
-```
-
-## 📄 Citation
-
-If you use this pipeline in your research, please cite:
-
-```
-@software{hippocampus_analysis_pipeline,
-  title = {AI-Powered Hippocampus Neural Data Analysis Pipeline},
-  author = {Computational Neuroscience Analysis Team},
-  year = {2025},
-  version = {2.0}
-}
-```
-
-## 📜 License
-
-This code is provided for research purposes. Please contact the authors for commercial use.
-
-## 🤝 Support
-
-For questions, issues, or feature requests:
-- Open an issue on the GitHub repository
-- Contact the development team
-
-## 🔄 Version History
-
-* **v2.0** (2025-11-15): MATLAB v7.3 support
-  + Automatic detection of MATLAB format
-  + HDF5/h5py integration for v7.3 files
-  + Improved error handling and validation
-  
-* **v1.0** (2025-11-14): Initial release
-  + Data loading and preprocessing
-  + Temporal coding analysis
-  + ML-based decoding (5 methods)
-  + Dimensionality reduction (5 methods)
-  + Sequence detection
-  + Comprehensive visualization suite
-
-## ✨ What's New in v2.0
-
-The major improvement is **automatic MATLAB v7.3 support**:
-
-- ✅ Works with both old MATLAB formats and v7.3 (HDF5)
-- ✅ Automatic format detection - no user intervention needed
-- ✅ Proper handling of HDF5 array transposition
-- ✅ Better error messages and validation
-
-No changes needed to your analysis code - it just works!
+For questions or issues, please contact the research team or open an issue in the repository.
 
 ---
 
-**Ready to analyze your data?**
-
-```bash
-# Test installation
-python test_installation.py
-
-# Run analysis
-python example_analysis.py your_data.mat
-```
+**Created:** 2024
+**Last Updated:** 2024
+**Version:** 1.0

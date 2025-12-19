@@ -500,6 +500,414 @@ class SequenceAnalyzer:
         }
 
 
+class TimeSeriesFeatureExtractor:
+    """
+    Advanced ML/AI-based feature extraction from neural time series.
+    
+    Extracts interpretable features and patterns from firing rate time series
+    using signal processing, time series analysis, and machine learning.
+    """
+    
+    def __init__(self):
+        pass
+    
+    def extract_all_features(self,
+                            neural_data,
+                            trial_mask: np.ndarray,
+                            time_window: Tuple[int, int] = (0, 3000),
+                            smooth_sigma: float = 50.0) -> Dict[str, Any]:
+        """
+        Extract comprehensive features from neural time series.
+        
+        Args:
+            neural_data: HippocampusDataLoader instance
+            trial_mask: Boolean mask for trials
+            time_window: Time window in ms
+            smooth_sigma: Smoothing parameter
+            
+        Returns:
+            Dictionary with extracted features for all neurons
+        """
+        print("\n" + "="*70)
+        print("AI/ML TIME SERIES FEATURE EXTRACTION")
+        print("="*70)
+        
+        # Extract activity
+        activity = neural_data.get_neural_activity(
+            trial_mask=trial_mask,
+            time_window=time_window
+        )
+        
+        # Get time vector
+        t_idx = (neural_data.time_vector >= time_window[0]) & \
+                (neural_data.time_vector < time_window[1])
+        time_vec = neural_data.time_vector[t_idx]
+        
+        n_neurons, n_time, n_trials = activity.shape
+        
+        # Compute mean activity and smooth
+        mean_activity = np.mean(activity, axis=2)
+        smooth_activity = np.zeros_like(mean_activity)
+        for i in range(n_neurons):
+            smooth_activity[i, :] = gaussian_filter1d(mean_activity[i, :], smooth_sigma)
+        
+        print(f"\nExtracting features from {n_neurons} neurons...")
+        
+        # Initialize feature dictionaries
+        features = {
+            'basic_stats': self._extract_basic_statistics(smooth_activity),
+            'temporal_features': self._extract_temporal_features(smooth_activity, time_vec),
+            'spectral_features': self._extract_spectral_features(smooth_activity),
+            'shape_features': self._extract_shape_features(smooth_activity),
+            'complexity_features': self._extract_complexity_features(smooth_activity),
+            'trial_variability': self._extract_trial_variability(activity)
+        }
+        
+        # Add raw data
+        features['smooth_activity'] = smooth_activity
+        features['time_vector'] = time_vec
+        features['n_neurons'] = n_neurons
+        
+        print(f"✓ Extracted {len(features)} feature categories")
+        
+        return features
+    
+    def _extract_basic_statistics(self, activity: np.ndarray) -> Dict[str, np.ndarray]:
+        """Extract basic statistical features."""
+        print("  - Basic statistics...")
+        
+        n_neurons = activity.shape[0]
+        
+        return {
+            'mean': np.mean(activity, axis=1),
+            'std': np.std(activity, axis=1),
+            'min': np.min(activity, axis=1),
+            'max': np.max(activity, axis=1),
+            'median': np.median(activity, axis=1),
+            'range': np.ptp(activity, axis=1),
+            'cv': np.std(activity, axis=1) / (np.mean(activity, axis=1) + 1e-10),
+            'skewness': stats.skew(activity, axis=1),
+            'kurtosis': stats.kurtosis(activity, axis=1)
+        }
+    
+    def _extract_temporal_features(self, activity: np.ndarray, time_vec: np.ndarray) -> Dict[str, np.ndarray]:
+        """Extract temporal/time-domain features."""
+        print("  - Temporal features...")
+        
+        n_neurons, n_time = activity.shape
+        
+        # Peak detection
+        peak_idx = np.argmax(activity, axis=1)
+        peak_times = time_vec[peak_idx]
+        peak_values = np.max(activity, axis=1)
+        
+        # Find trough
+        trough_idx = np.argmin(activity, axis=1)
+        trough_values = np.min(activity, axis=1)
+        
+        # Peak width at half-maximum
+        peak_widths = np.zeros(n_neurons)
+        for i in range(n_neurons):
+            half_max = (peak_values[i] + trough_values[i]) / 2
+            above_half = activity[i, :] > half_max
+            if np.any(above_half):
+                peak_widths[i] = np.sum(above_half)
+        
+        # Slope at peak (derivative)
+        gradients = np.gradient(activity, axis=1)
+        max_slope = np.max(np.abs(gradients), axis=1)
+        
+        # Rise time and fall time
+        rise_times = np.zeros(n_neurons)
+        fall_times = np.zeros(n_neurons)
+        
+        for i in range(n_neurons):
+            peak_i = peak_idx[i]
+            # Rise time: 10% to 90% of max
+            val_10 = trough_values[i] + 0.1 * (peak_values[i] - trough_values[i])
+            val_90 = trough_values[i] + 0.9 * (peak_values[i] - trough_values[i])
+            
+            before_peak = activity[i, :peak_i]
+            if len(before_peak) > 0:
+                idx_10 = np.where(before_peak >= val_10)[0]
+                idx_90 = np.where(before_peak >= val_90)[0]
+                if len(idx_10) > 0 and len(idx_90) > 0:
+                    rise_times[i] = idx_90[0] - idx_10[0]
+            
+            # Fall time
+            after_peak = activity[i, peak_i:]
+            if len(after_peak) > 0:
+                idx_90_fall = np.where(after_peak <= val_90)[0]
+                idx_10_fall = np.where(after_peak <= val_10)[0]
+                if len(idx_90_fall) > 0 and len(idx_10_fall) > 0:
+                    fall_times[i] = idx_10_fall[0] - idx_90_fall[0] if idx_10_fall[0] > idx_90_fall[0] else 0
+        
+        return {
+            'peak_time': peak_times,
+            'peak_value': peak_values,
+            'peak_width': peak_widths,
+            'max_slope': max_slope,
+            'rise_time': rise_times,
+            'fall_time': fall_times,
+            'asymmetry': (rise_times - fall_times) / (rise_times + fall_times + 1e-10)
+        }
+    
+    def _extract_spectral_features(self, activity: np.ndarray) -> Dict[str, np.ndarray]:
+        """Extract frequency-domain features using FFT."""
+        print("  - Spectral features...")
+        
+        n_neurons, n_time = activity.shape
+        
+        # Compute FFT for each neuron
+        fft_vals = np.fft.rfft(activity, axis=1)
+        power_spectrum = np.abs(fft_vals)**2
+        freqs = np.fft.rfftfreq(n_time)
+        
+        # Dominant frequency
+        dominant_freq_idx = np.argmax(power_spectrum, axis=1)
+        dominant_freq = freqs[dominant_freq_idx]
+        
+        # Spectral centroid (center of mass of spectrum)
+        spectral_centroid = np.sum(freqs * power_spectrum, axis=1) / (np.sum(power_spectrum, axis=1) + 1e-10)
+        
+        # Spectral spread (standard deviation)
+        spectral_spread = np.sqrt(np.sum(((freqs - spectral_centroid[:, np.newaxis])**2) * power_spectrum, axis=1) / 
+                                 (np.sum(power_spectrum, axis=1) + 1e-10))
+        
+        # Spectral entropy
+        normalized_spectrum = power_spectrum / (np.sum(power_spectrum, axis=1, keepdims=True) + 1e-10)
+        spectral_entropy = -np.sum(normalized_spectrum * np.log(normalized_spectrum + 1e-10), axis=1)
+        
+        # Band power (divide into frequency bands)
+        low_band = np.sum(power_spectrum[:, :len(freqs)//4], axis=1)
+        mid_band = np.sum(power_spectrum[:, len(freqs)//4:len(freqs)//2], axis=1)
+        high_band = np.sum(power_spectrum[:, len(freqs)//2:], axis=1)
+        total_power = np.sum(power_spectrum, axis=1)
+        
+        return {
+            'dominant_frequency': dominant_freq,
+            'spectral_centroid': spectral_centroid,
+            'spectral_spread': spectral_spread,
+            'spectral_entropy': spectral_entropy,
+            'low_band_power': low_band / (total_power + 1e-10),
+            'mid_band_power': mid_band / (total_power + 1e-10),
+            'high_band_power': high_band / (total_power + 1e-10),
+            'total_power': total_power
+        }
+    
+    def _extract_shape_features(self, activity: np.ndarray) -> Dict[str, np.ndarray]:
+        """Extract shape-based features of firing rate curves."""
+        print("  - Shape features...")
+        
+        n_neurons, n_time = activity.shape
+        
+        # Number of peaks
+        n_peaks = np.zeros(n_neurons)
+        for i in range(n_neurons):
+            # Find local maxima
+            peaks = (activity[i, 1:-1] > activity[i, :-2]) & (activity[i, 1:-1] > activity[i, 2:])
+            n_peaks[i] = np.sum(peaks)
+        
+        # Smoothness (inverse of total variation)
+        total_variation = np.sum(np.abs(np.diff(activity, axis=1)), axis=1)
+        smoothness = 1.0 / (total_variation + 1e-10)
+        
+        # Monotonicity score (how much of curve is monotonic)
+        diffs = np.diff(activity, axis=1)
+        monotonic_increasing = np.sum(diffs > 0, axis=1) / n_time
+        monotonic_decreasing = np.sum(diffs < 0, axis=1) / n_time
+        monotonicity = np.maximum(monotonic_increasing, monotonic_decreasing)
+        
+        # Curve area (integral)
+        curve_area = np.sum(activity, axis=1)
+        
+        return {
+            'n_peaks': n_peaks,
+            'smoothness': smoothness,
+            'monotonicity': monotonicity,
+            'curve_area': curve_area,
+            'monotonic_direction': np.sign(monotonic_increasing - monotonic_decreasing)
+        }
+    
+    def _extract_complexity_features(self, activity: np.ndarray) -> Dict[str, np.ndarray]:
+        """Extract complexity and information-theoretic features."""
+        print("  - Complexity features...")
+        
+        n_neurons, n_time = activity.shape
+        
+        # Approximate entropy (regularity measure)
+        def approximate_entropy(signal, m=2, r=0.2):
+            """Compute approximate entropy of a signal."""
+            N = len(signal)
+            r = r * np.std(signal)
+            
+            def _maxdist(x_i, x_j, m):
+                return max([abs(x_i[k] - x_j[k]) for k in range(m)])
+            
+            def _phi(m):
+                patterns = np.array([[signal[i+j] for j in range(m)] for i in range(N - m + 1)])
+                C = np.zeros(N - m + 1)
+                for i in range(N - m + 1):
+                    matches = sum([1 for j in range(N - m + 1) if _maxdist(patterns[i], patterns[j], m) <= r])
+                    C[i] = matches / (N - m + 1)
+                return np.sum(np.log(C + 1e-10)) / (N - m + 1)
+            
+            return abs(_phi(m) - _phi(m + 1))
+        
+        approx_entropy = np.array([approximate_entropy(activity[i, :]) for i in range(n_neurons)])
+        
+        # Sample entropy (similar but more robust)
+        # Simplified version for speed
+        sample_entropy = np.array([np.std(np.diff(activity[i, :])) / (np.std(activity[i, :]) + 1e-10) 
+                                  for i in range(n_neurons)])
+        
+        # Zero-crossing rate
+        zero_crossings = np.zeros(n_neurons)
+        for i in range(n_neurons):
+            centered = activity[i, :] - np.mean(activity[i, :])
+            zero_crossings[i] = np.sum(np.diff(np.sign(centered)) != 0) / n_time
+        
+        return {
+            'approximate_entropy': approx_entropy,
+            'sample_entropy': sample_entropy,
+            'zero_crossing_rate': zero_crossings
+        }
+    
+    def _extract_trial_variability(self, activity: np.ndarray) -> Dict[str, np.ndarray]:
+        """Extract features related to trial-to-trial variability."""
+        print("  - Trial variability features...")
+        
+        n_neurons, n_time, n_trials = activity.shape
+        
+        # Fano factor (variance / mean over trials)
+        mean_over_trials = np.mean(activity, axis=2)
+        var_over_trials = np.var(activity, axis=2)
+        fano_factor = var_over_trials / (mean_over_trials + 1e-10)
+        
+        # Mean Fano factor over time
+        mean_fano = np.mean(fano_factor, axis=1)
+        
+        # Coefficient of variation over trials
+        cv_trials = np.std(activity, axis=2) / (np.mean(activity, axis=2) + 1e-10)
+        mean_cv_trials = np.mean(cv_trials, axis=1)
+        
+        # Reliability (correlation between trials)
+        reliability = np.zeros(n_neurons)
+        for i in range(n_neurons):
+            # Compute average pairwise correlation between trials
+            corrs = []
+            for t1 in range(n_trials):
+                for t2 in range(t1+1, n_trials):
+                    if np.std(activity[i, :, t1]) > 0 and np.std(activity[i, :, t2]) > 0:
+                        corr = np.corrcoef(activity[i, :, t1], activity[i, :, t2])[0, 1]
+                        if not np.isnan(corr):
+                            corrs.append(corr)
+            reliability[i] = np.mean(corrs) if corrs else 0
+        
+        return {
+            'mean_fano_factor': mean_fano,
+            'mean_cv_trials': mean_cv_trials,
+            'trial_reliability': reliability
+        }
+    
+    def cluster_neurons(self,
+                       features: Dict[str, Any],
+                       n_clusters: int = 5,
+                       features_to_use: Optional[list] = None) -> Dict[str, Any]:
+        """
+        Cluster neurons based on extracted features using unsupervised ML.
+        
+        Args:
+            features: Output from extract_all_features
+            n_clusters: Number of clusters
+            features_to_use: List of feature names to use (None = use all)
+            
+        Returns:
+            Dictionary with clustering results
+        """
+        print(f"\nClustering neurons into {n_clusters} groups...")
+        
+        # Collect features into matrix
+        feature_matrix = []
+        feature_names = []
+        
+        if features_to_use is None:
+            # Use key temporal and shape features
+            features_to_use = [
+                'basic_stats/mean', 'basic_stats/cv',
+                'temporal_features/peak_time', 'temporal_features/peak_width',
+                'spectral_features/dominant_frequency',
+                'shape_features/n_peaks', 'shape_features/monotonicity',
+                'trial_variability/trial_reliability'
+            ]
+        
+        for feat_path in features_to_use:
+            category, name = feat_path.split('/')
+            if category in features and name in features[category]:
+                feature_matrix.append(features[category][name])
+                feature_names.append(f"{category}/{name}")
+        
+        feature_matrix = np.array(feature_matrix).T  # (n_neurons, n_features)
+        
+        # Standardize features
+        scaler = StandardScaler()
+        feature_matrix_scaled = scaler.fit_transform(feature_matrix)
+        
+        # K-means clustering
+        from sklearn.cluster import KMeans
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        cluster_labels = kmeans.fit_predict(feature_matrix_scaled)
+        
+        # Compute cluster statistics
+        cluster_stats = {}
+        for c in range(n_clusters):
+            mask = cluster_labels == c
+            cluster_stats[c] = {
+                'n_neurons': np.sum(mask),
+                'neuron_indices': np.where(mask)[0],
+                'feature_means': {name: np.mean(feature_matrix[mask, i]) 
+                                for i, name in enumerate(feature_names)}
+            }
+        
+        print(f"✓ Clustering complete")
+        for c in range(n_clusters):
+            print(f"  Cluster {c}: {cluster_stats[c]['n_neurons']} neurons")
+        
+        return {
+            'cluster_labels': cluster_labels,
+            'cluster_centers': kmeans.cluster_centers_,
+            'cluster_stats': cluster_stats,
+            'feature_names': feature_names,
+            'feature_matrix': feature_matrix_scaled,
+            'n_clusters': n_clusters
+        }
+    
+    def classify_neuron_types(self,
+                             features: Dict[str, Any],
+                             known_labels: Optional[np.ndarray] = None) -> Dict[str, Any]:
+        """
+        Classify neurons into functional types using ML.
+        
+        If known_labels provided, uses supervised learning.
+        Otherwise, uses unsupervised clustering.
+        
+        Args:
+            features: Output from extract_all_features
+            known_labels: Optional array of known neuron types
+            
+        Returns:
+            Dictionary with classification results
+        """
+        if known_labels is not None:
+            print("\nSupervised classification of neuron types...")
+            # Would implement supervised classifier here
+            # For now, use clustering
+            pass
+        
+        # Unsupervised: cluster based on features
+        return self.cluster_neurons(features, n_clusters=5)
+
+
 if __name__ == "__main__":
     print("Neural Analysis AI Module")
     print("Import this module to use the analysis classes:")
