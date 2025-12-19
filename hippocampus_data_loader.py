@@ -239,20 +239,43 @@ class HippocampusDataLoader:
         print(f"Loading HDF5-format .mat file: {filepath.name}")
 
         with h5py.File(filepath, 'r') as f:
-            # Check for required fields
-            required_fields = ['neur_tensor_trialon', 'cond_matrix']
-            missing_fields = [field for field in required_fields if field not in f.keys()]
+            # Check available fields
+            available_fields = list(f.keys())
+            print(f"Available fields: {available_fields}")
 
-            if missing_fields:
-                available_fields = list(f.keys())
+            # Find neural tensor field (try multiple possible names)
+            neur_tensor_field = None
+            possible_neur_fields = [
+                'neur_tensor_trialon',
+                'neur_tensor_stim1on',
+                'neur_tensor_stim2on',
+                'neur_tensor',
+                'neural_data'
+            ]
+
+            for field_name in possible_neur_fields:
+                if field_name in f:
+                    neur_tensor_field = field_name
+                    print(f"Found neural tensor: '{neur_tensor_field}'")
+                    break
+
+            if neur_tensor_field is None:
                 raise ValueError(
-                    f"Missing required fields: {missing_fields}\n"
+                    f"Could not find neural tensor field.\n"
+                    f"Tried: {possible_neur_fields}\n"
+                    f"Available: {available_fields}"
+                )
+
+            # Check for condition matrix
+            if 'cond_matrix' not in f:
+                raise ValueError(
+                    f"Missing required field 'cond_matrix'.\n"
                     f"Available fields: {available_fields}"
                 )
 
             # Load neural tensor
             # HDF5 stores arrays in transposed form compared to scipy.io.loadmat
-            neur_tensor_h5 = f['neur_tensor_trialon']
+            neur_tensor_h5 = f[neur_tensor_field]
             neur_tensor = np.array(neur_tensor_h5)
 
             # Check if we need to transpose (HDF5 often stores in Fortran order)
@@ -271,19 +294,49 @@ class HippocampusDataLoader:
             if cond_matrix.ndim == 2 and cond_matrix.shape[0] < cond_matrix.shape[1]:
                 cond_matrix = cond_matrix.T
 
-            # Load LFP if available
-            if 'lfp_tensor_trialon' in f:
-                lfp_tensor_h5 = f['lfp_tensor_trialon']
+            # Load LFP if available (try multiple possible names)
+            lfp_field = None
+            possible_lfp_fields = ['lfp_tensor_trialon', 'lfp_tensor_stim1on', 'lfp_tensor']
+
+            for field_name in possible_lfp_fields:
+                if field_name in f:
+                    lfp_field = field_name
+                    break
+
+            if lfp_field:
+                lfp_tensor_h5 = f[lfp_field]
                 lfp_tensor = np.array(lfp_tensor_h5)
                 if lfp_tensor.ndim == 3 and lfp_tensor.shape[0] < lfp_tensor.shape[2]:
                     lfp_tensor = np.transpose(lfp_tensor, (2, 1, 0))
+                print(f"Found LFP data: '{lfp_field}'")
             else:
                 warnings.warn("LFP data not found in .mat file")
                 lfp_tensor = np.zeros((0, neur_tensor.shape[1], neur_tensor.shape[2]))
 
-            # Use provided labels or defaults
+            # Load condition labels from file if available
             if condition_labels is None:
-                condition_labels = HippocampusDataLoader.DEFAULT_CONDITION_LABELS[:cond_matrix.shape[1]]
+                if 'cond_label' in f:
+                    # Load condition labels from file
+                    cond_label_h5 = f['cond_label']
+                    # HDF5 stores strings as references, need special handling
+                    try:
+                        if hasattr(cond_label_h5, 'shape') and len(cond_label_h5.shape) > 0:
+                            loaded_labels = []
+                            for i in range(len(cond_label_h5)):
+                                ref = cond_label_h5[i, 0] if cond_label_h5.ndim > 1 else cond_label_h5[i]
+                                if isinstance(ref, h5py.h5r.Reference):
+                                    label_obj = f[ref]
+                                    label = ''.join(chr(c[0]) for c in label_obj[:])
+                                else:
+                                    label = str(ref)
+                                loaded_labels.append(label)
+                            condition_labels = loaded_labels[:cond_matrix.shape[1]]
+                            print(f"Loaded condition labels from file: {condition_labels}")
+                    except Exception as e:
+                        print(f"Warning: Could not load condition labels from file: {e}")
+                        condition_labels = HippocampusDataLoader.DEFAULT_CONDITION_LABELS[:cond_matrix.shape[1]]
+                else:
+                    condition_labels = HippocampusDataLoader.DEFAULT_CONDITION_LABELS[:cond_matrix.shape[1]]
 
             # Ensure we have the right number of labels
             if len(condition_labels) != cond_matrix.shape[1]:
@@ -336,23 +389,53 @@ class HippocampusDataLoader:
             # Try loading with scipy.io first (for MATLAB v7 and older)
             mat_data = sio.loadmat(str(filepath))
 
-            # Extract main data arrays
-            required_fields = ['neur_tensor_trialon', 'cond_matrix']
-            missing_fields = [f for f in required_fields if f not in mat_data]
+            # Find neural tensor field (try multiple possible names)
+            available_fields = [k for k in mat_data.keys() if not k.startswith('__')]
 
-            if missing_fields:
-                available_fields = [k for k in mat_data.keys() if not k.startswith('__')]
+            neur_tensor_field = None
+            possible_neur_fields = [
+                'neur_tensor_trialon',
+                'neur_tensor_stim1on',
+                'neur_tensor_stim2on',
+                'neur_tensor',
+                'neural_data'
+            ]
+
+            for field_name in possible_neur_fields:
+                if field_name in mat_data:
+                    neur_tensor_field = field_name
+                    print(f"Found neural tensor: '{neur_tensor_field}'")
+                    break
+
+            if neur_tensor_field is None:
                 raise ValueError(
-                    f"Missing required fields: {missing_fields}\n"
+                    f"Could not find neural tensor field.\n"
+                    f"Tried: {possible_neur_fields}\n"
+                    f"Available: {available_fields}"
+                )
+
+            # Check for condition matrix
+            if 'cond_matrix' not in mat_data:
+                raise ValueError(
+                    f"Missing required field 'cond_matrix'.\n"
                     f"Available fields: {available_fields}"
                 )
 
-            neur_tensor = mat_data['neur_tensor_trialon']
+            neur_tensor = mat_data[neur_tensor_field]
             cond_matrix = mat_data['cond_matrix']
 
-            # LFP data is optional
-            if 'lfp_tensor_trialon' in mat_data:
-                lfp_tensor = mat_data['lfp_tensor_trialon']
+            # LFP data is optional (try multiple possible names)
+            lfp_field = None
+            possible_lfp_fields = ['lfp_tensor_trialon', 'lfp_tensor_stim1on', 'lfp_tensor']
+
+            for field_name in possible_lfp_fields:
+                if field_name in mat_data:
+                    lfp_field = field_name
+                    break
+
+            if lfp_field:
+                lfp_tensor = mat_data[lfp_field]
+                print(f"Found LFP data: '{lfp_field}'")
             else:
                 warnings.warn("LFP data not found in .mat file")
                 # Create placeholder with correct dimensions
