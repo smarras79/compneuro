@@ -15,6 +15,13 @@ from typing import Dict, List, Tuple, Optional, Union
 from dataclasses import dataclass, field
 import warnings
 
+try:
+    import h5py
+    HDF5_AVAILABLE = True
+except ImportError:
+    HDF5_AVAILABLE = False
+    warnings.warn("h5py not available. MATLAB v7.3 files cannot be loaded. Install with: pip install h5py")
+
 
 @dataclass
 class NeuralData:
@@ -210,6 +217,98 @@ class HippocampusDataLoader:
     ]
 
     @staticmethod
+    def _load_hdf5_mat_file(filepath: Path,
+                           condition_labels: Optional[List[str]] = None) -> NeuralData:
+        """
+        Load MATLAB v7.3 file using h5py.
+
+        Args:
+            filepath: Path to .mat file
+            condition_labels: Optional list of condition label names
+
+        Returns:
+            NeuralData object
+
+        Raises:
+            ImportError: If h5py is not available
+            ValueError: If required fields are missing
+        """
+        if not HDF5_AVAILABLE:
+            raise ImportError("h5py is required to load MATLAB v7.3 files. Install with: pip install h5py")
+
+        print(f"Loading HDF5-format .mat file: {filepath.name}")
+
+        with h5py.File(filepath, 'r') as f:
+            # Check for required fields
+            required_fields = ['neur_tensor_trialon', 'cond_matrix']
+            missing_fields = [field for field in required_fields if field not in f.keys()]
+
+            if missing_fields:
+                available_fields = list(f.keys())
+                raise ValueError(
+                    f"Missing required fields: {missing_fields}\n"
+                    f"Available fields: {available_fields}"
+                )
+
+            # Load neural tensor
+            # HDF5 stores arrays in transposed form compared to scipy.io.loadmat
+            neur_tensor_h5 = f['neur_tensor_trialon']
+            neur_tensor = np.array(neur_tensor_h5)
+
+            # Check if we need to transpose (HDF5 often stores in Fortran order)
+            # Expected shape: (neurons × time × trials)
+            if neur_tensor.ndim == 3:
+                # HDF5 typically stores as (trials × time × neurons), need to transpose
+                if neur_tensor.shape[0] < neur_tensor.shape[2]:
+                    # Likely needs transpose
+                    neur_tensor = np.transpose(neur_tensor, (2, 1, 0))
+
+            # Load condition matrix
+            cond_matrix_h5 = f['cond_matrix']
+            cond_matrix = np.array(cond_matrix_h5)
+
+            # Transpose if needed (HDF5 stores as columns × rows)
+            if cond_matrix.ndim == 2 and cond_matrix.shape[0] < cond_matrix.shape[1]:
+                cond_matrix = cond_matrix.T
+
+            # Load LFP if available
+            if 'lfp_tensor_trialon' in f:
+                lfp_tensor_h5 = f['lfp_tensor_trialon']
+                lfp_tensor = np.array(lfp_tensor_h5)
+                if lfp_tensor.ndim == 3 and lfp_tensor.shape[0] < lfp_tensor.shape[2]:
+                    lfp_tensor = np.transpose(lfp_tensor, (2, 1, 0))
+            else:
+                warnings.warn("LFP data not found in .mat file")
+                lfp_tensor = np.zeros((0, neur_tensor.shape[1], neur_tensor.shape[2]))
+
+            # Use provided labels or defaults
+            if condition_labels is None:
+                condition_labels = HippocampusDataLoader.DEFAULT_CONDITION_LABELS[:cond_matrix.shape[1]]
+
+            # Ensure we have the right number of labels
+            if len(condition_labels) != cond_matrix.shape[1]:
+                warnings.warn(
+                    f"Number of condition labels ({len(condition_labels)}) doesn't match "
+                    f"condition matrix columns ({cond_matrix.shape[1]}). Using defaults."
+                )
+                condition_labels = HippocampusDataLoader.DEFAULT_CONDITION_LABELS[:cond_matrix.shape[1]]
+
+            print(f"✓ Loaded {neur_tensor.shape[0]} neurons, "
+                  f"{neur_tensor.shape[2]} trials, "
+                  f"{neur_tensor.shape[1]} timepoints")
+
+            # Create NeuralData object
+            neural_data = NeuralData(
+                neur_tensor=neur_tensor,
+                lfp_tensor=lfp_tensor,
+                cond_matrix=cond_matrix,
+                condition_labels=condition_labels,
+                filename=filepath.name
+            )
+
+            return neural_data
+
+    @staticmethod
     def load_mat_file(filepath: Union[str, Path],
                      condition_labels: Optional[List[str]] = None) -> NeuralData:
         """
@@ -234,7 +333,7 @@ class HippocampusDataLoader:
         print(f"Loading data from: {filepath.name}")
 
         try:
-            # Load .mat file
+            # Try loading with scipy.io first (for MATLAB v7 and older)
             mat_data = sio.loadmat(str(filepath))
 
             # Extract main data arrays
@@ -286,8 +385,22 @@ class HippocampusDataLoader:
 
             return neural_data
 
+        except NotImplementedError as e:
+            # This error occurs when trying to load MATLAB v7.3 files with scipy
+            if "HDF reader" in str(e) or "v7.3" in str(e):
+                print("Detected MATLAB v7.3 file, using HDF5 reader...")
+                return HippocampusDataLoader._load_hdf5_mat_file(filepath, condition_labels)
+            else:
+                raise RuntimeError(f"Error loading {filepath}: {str(e)}")
+
         except Exception as e:
-            raise RuntimeError(f"Error loading {filepath}: {str(e)}")
+            # Check if it's an HDF5 format issue
+            error_msg = str(e).lower()
+            if "hdf" in error_msg or "v7.3" in error_msg:
+                print("Detected MATLAB v7.3 file, using HDF5 reader...")
+                return HippocampusDataLoader._load_hdf5_mat_file(filepath, condition_labels)
+            else:
+                raise RuntimeError(f"Error loading {filepath}: {str(e)}")
 
     @staticmethod
     def load_multiple_files(directory: Union[str, Path],
