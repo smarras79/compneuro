@@ -42,7 +42,10 @@ function apply_neural_filter(data::Vector,
                             filter_order::Int=4,
                             poly_order::Int=3,
                             alpha::Float64=0.1,
-                            sigma::Float64=window_size/6)
+                            sigma::Union{Float64,Int}=window_size/6)
+    
+    # Convert sigma to Float64 if needed
+    sigma_float = Float64(sigma)
     
     if filter_type == :moving_average
         # Original implementation: simple box filter
@@ -56,7 +59,7 @@ function apply_neural_filter(data::Vector,
         # Gaussian filter - smooth with bell-shaped kernel
         # Create Gaussian kernel
         x = -(window_size÷2):(window_size÷2)
-        kernel = exp.(-(x.^2) ./ (2*sigma^2))
+        kernel = exp.(-(x.^2) ./ (2*sigma_float^2))
         kernel = kernel ./ sum(kernel)  # Normalize
         
         m = length(kernel)
@@ -251,13 +254,13 @@ end
 
 #%% ====== FILTER SELECTION ======
 # CHOOSE YOUR FILTER TYPE HERE:
-# Select filter type (change this to try different filters)
-selected_filter = :gaussian #:moving_average  # Default: same as original code
 # Options: :moving_average, :gaussian, :savitzky_golay, :butterworth, :median, :exponential
 
 # Print available options
 print_filter_options()
 
+# Select filter type (change this to try different filters)
+selected_filter = :moving_average  # Default: same as original code
 
 # Window size (300 samples as in original)
 window_size = 300
@@ -269,7 +272,7 @@ filter_params = Dict(
     :filter_order => 4,        # Butterworth order
     :poly_order => 3,          # Savitzky-Golay polynomial order
     :alpha => 0.05,            # Exponential MA smoothing factor
-    :sigma => window_size/6    # Gaussian standard deviation
+    :sigma => Float64(window_size)/6.0    # Gaussian standard deviation
 )
 
 println("Using filter: $(selected_filter)")
@@ -318,7 +321,7 @@ if length(time_bins) != length(fr3_smooth)
     println("  Adjusted to length: $(min_len)")
 end
 
-neural_plots(time_bins, fr3_smooth, fr4_smooth, "1", selected_filter)
+neural_plots(time_bins, fr3_smooth, fr4_smooth, "1")
 
 println("\n✓ Neural data processed with $(selected_filter) filter")
 println("✓ Smoothed firing rates computed and plotted")
