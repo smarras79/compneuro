@@ -23,7 +23,7 @@ function neural_plots_scatter(x, y, ivar)
     
 end
 
-function neural_plots(x, y1, y2, ivar)
+function neural_plots(x, y1, y2, ivar, selected_filter)
     
     # Verify lengths match
     println("Length of time_bins: ", length(x))
@@ -59,7 +59,7 @@ function neural_plots(x, y1, y2, ivar)
     # Save to file
     #savefig(neuprintln("Saved neural plot to: neural_firing_rates.png")
     
-    fout_name = string("neural_curve", ivar, ".png")
+    fout_name = string("neural_curve", ivar, "_", selected_filter, ".png")
     Plots.savefig(neural_plot, string(fout_name))
     neural_plot
 end
