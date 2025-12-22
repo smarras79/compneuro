@@ -74,6 +74,26 @@ A complete, professional-grade neural analysis toolkit for detecting Sharp-Wave 
 
 ## 🚀 Quick Start (5 Minutes)
 
+### Important: Where Does Your Data Come From?
+
+Before running any analysis, you need to extract your neural signal from the .mat file:
+
+```julia
+using MAT
+using Statistics
+
+# Load your .mat file
+data = matread("../data/amadeus01172020_a_neur_tensor_stim1on.mat")
+neur_tensor = data["neur_tensor_stim1on"]
+
+# Extract signal (average neuron 1 across trials)
+your_neural_data = vec(mean(neur_tensor[1, :, :], dims=2))
+
+# Now you have: Vector{Float64} ready for analysis!
+```
+
+**📖 See `DATA_LOADING_GUIDE.md` for complete details on data extraction!**
+
 ### Option 1: Run Complete Example
 
 ```julia

@@ -12,6 +12,50 @@
 **What**: DSP.jl API incompatibility with Lowpass(cutoff; fs=fs)  
 **Fix**: Frequency normalization done internally
 
+### Fixed Issue #3: Type Conversion
+**Status**: ✅ RESOLVED  
+**What**: Integer sigma parameter causing TypeError  
+**Fix**: Automatic Int to Float64 conversion
+
+### Fixed Issue #4: Dictionary Sorting
+**Status**: ✅ RESOLVED  
+**What**: Cannot sort nested dictionaries  
+**Fix**: Sort only keys, not values
+
+---
+
+## 📁 WHERE DOES YOUR_NEURAL_DATA COME FROM?
+
+### From Your .mat File
+
+```julia
+using MAT
+using Statistics
+
+# Load data
+data = matread("../data/amadeus01172020_a_neur_tensor_stim1on.mat")
+neur_tensor = data["neur_tensor_stim1on"]
+
+# Extract signal: Average neuron 1 across all trials
+your_neural_data = vec(mean(neur_tensor[1, :, :], dims=2))
+
+# Now you have Vector{Float64} ready for analysis!
+```
+
+### With Condition Selection
+
+```julia
+# Select specific trials
+cond_matrix = data["cond_matrix"]
+trial_indices = findall(cond_matrix[:, 10] .== 1)
+
+# Extract for those trials only
+neuron_data = neur_tensor[1, :, trial_indices]
+your_neural_data = vec(mean(neuron_data, dims=2))
+```
+
+**See `DATA_LOADING_GUIDE.md` for complete details!**
+
 ---
 
 ## Quick Start (Copy-Paste Ready)
