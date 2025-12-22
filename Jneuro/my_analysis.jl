@@ -14,6 +14,8 @@ println("\n[1/4] Loading data...")
 
 data = matread("../data/amadeus01172020_a_neur_tensor_stim1on.mat")
 neur_tensor = data["neur_tensor_stim1on"]
+# This is a 3D array: (neurons × time × trials)
+# Example shape: (3, 3998, 120)
 
 # Extract signal
 your_neural_data = vec(mean(neur_tensor[1, :, :], dims=2))
@@ -33,8 +35,32 @@ println("\n[3/4] Running analysis...")
 
 fs = 1000.0  # Sampling frequency in Hz
 
+lfilter     = true
+filter_type = :gaussian #moving_average 
+# ==== 1. Select filter type (change this to try different filters)
+#         Options:
+#                   :moving_average
+#                   :gaussian
+#                   :savitzky_golay
+#                   :butterworth
+#                   :median
+#                   :exponential
+#
+if lfilter
+    
+    # Before analysis, filter the signal
+    signal_filtered = apply_neural_filter(
+        your_neural_data,
+        filter_type,  # Filter type
+        300;        # Window size
+        sigma=50.0  # Smoothness
+    )
+else
+    signal_filtered = your_neural_data
+end
+
 results = analyze_neural_data_comprehensive(
-    your_neural_data,
+    signal_filtered,
     nothing;  # No behavioral events
     fs=fs
 )

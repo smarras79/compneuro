@@ -73,8 +73,10 @@ function analyze_neural_data_comprehensive(signal::Vector{Float64},
         
         # Print band powers
         println("  Frequency band analysis:")
-        for (band, info) in sort(collect(band_analysis))
+        # Sort only the keys, not the nested dictionary values
+        for band in sort(collect(keys(band_analysis)))
             if band != "total_power" && band != "freq" && band != "power_spectrum"
+                info = band_analysis[band]
                 rel_power = get(info, "relative_power", 0.0)
                 println(@sprintf("    %12s: %.2f%% of total power", 
                                band, rel_power * 100))

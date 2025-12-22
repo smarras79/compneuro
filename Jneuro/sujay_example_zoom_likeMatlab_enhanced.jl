@@ -193,8 +193,8 @@ end
 data = matread("../data/amadeus01172020_a_neur_tensor_stim1on.mat")
 # Alternative file: amadeus01172020_a_neur_tensor_joyon.mat
 # Extract variables from the loaded data
-cond_label = data["cond_label"]
-cond_matrix = data["cond_matrix"]
+cond_label          = data["cond_label"]
+cond_matrix         = data["cond_matrix"]
 neur_tensor_stim1on = data["neur_tensor_stim1on"]
 stim1on = data["stim1on"]
 
