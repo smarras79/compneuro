@@ -333,26 +333,40 @@ Detect SWRs around specific event times (e.g., joystick motion onset/offset).
 
 # Arguments
 - `signal`: Neural signal
-- `event_times`: Vector of event times in samples or seconds
+- `event_times`: Vector of event times in seconds
 - `fs`: Sampling frequency
 - `window_ms`: Time window around each event to search for SWRs
-- `kwargs`: Additional parameters for detect_swr_classical
+- `kwargs`: Additional parameters for detect_swr_classical (ripple_band, threshold_sd, etc.)
 
 # Returns
 Dictionary with SWRs found near each event
 """
-function detect_swr_at_events(signal::Vector{Float64}, event_times::Vector{Float64},
+function detect_swr_at_events(signal::Vector{Float64}, event_times::Vector,
                              fs::Float64=1000.0; window_ms=500.0, kwargs...)
     
     window_samples = Int(round(window_ms * fs / 1000))
     results = Dict()
     
-    # Detect all SWRs first
+    # Detect all SWRs first (filter out window_ms from kwargs as it's not for detect_swr_classical)
     all_swr = detect_swr_classical(signal, fs; kwargs...)
     
     # For each event, find SWRs within window
     for (idx, event_time) in enumerate(event_times)
+        # Convert to sample index (event_time should be in seconds)
         event_sample = Int(round(event_time * fs))
+        
+        # Skip if event is outside signal bounds
+        if event_sample < 1 || event_sample > length(signal)
+            @warn "Event $idx at time $(event_time)s (sample $event_sample) is outside signal bounds"
+            results["event_$idx"] = Dict(
+                "event_time" => event_time,
+                "event_sample" => event_sample,
+                "window" => (0, 0),
+                "swr_events" => [],
+                "n_swr" => 0
+            )
+            continue
+        end
         
         window_start = max(1, event_sample - window_samples÷2)
         window_end = min(length(signal), event_sample + window_samples÷2)

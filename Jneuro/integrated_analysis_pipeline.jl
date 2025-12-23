@@ -136,8 +136,37 @@ function analyze_neural_data_comprehensive(signal::Vector{Float64},
     if !isnothing(behavioral_events)
         println("\nStep 3/5: Event-Triggered Analysis...")
         
+        # Debug: Show what's in behavioral_events
+        println("  Debug - Behavioral events dictionary:")
+        for (key, value) in behavioral_events
+            if isa(value, AbstractVector)
+                println("    $key: Vector with $(length(value)) elements")
+                if length(value) > 0
+                    println("      First value: $(round(value[1], digits=3))")
+                    if length(value) > 1
+                        println("      Last value: $(round(value[end], digits=3))")
+                    end
+                end
+            else
+                println("    $key: $(typeof(value)) = $value")
+            end
+        end
+        println()
+        
         try
             for (event_type, event_times) in behavioral_events
+                # Skip metadata fields (n_events is an integer, not event times)
+                if event_type == "n_events" || !isa(event_times, AbstractVector)
+                    println("  ⊘ Skipping $event_type ($(typeof(event_times)), not a vector of times)")
+                    continue
+                end
+                
+                # Skip if no events
+                if length(event_times) == 0
+                    println("  ⊘ Skipping $event_type (no events)")
+                    continue
+                end
+                
                 println("  Analyzing $event_type events (n=$(length(event_times)))...")
                 
                 event_swr = detect_swr_at_events(
