@@ -10,10 +10,12 @@ include("./auxiliary_functions.jl")  # Load filter function
 # Define these BEFORE using them
 fs = 1000.0           # Sampling frequency (Hz)
 window_size = 300     # Filter window size
+ineuron = 1
 
 println("Configuration:")
 println("  Sampling frequency: $(fs) Hz")
 println("  Window size: $(window_size)")
+println("  Neuron number: $(ineuron)")
 println()
 
 # Load the .mat file
@@ -37,7 +39,7 @@ selected_filter = :moving_average  # Default: same as original code
 # Additional parameters for specific filters (adjust as needed)
 filter_params = Dict(
     :cutoff_freq => 0.05,              # For Butterworth (Hz)
-    :fs => 1.0,                        # Sampling frequency (Hz)
+    :fs => 1000.0,                     # Sampling frequency (Hz)
     :filter_order => 4,                # Butterworth order
     :poly_order => 3,                  # Savitzky-Golay polynomial order
     :alpha => 0.05,                    # Exponential MA smoothing factor
@@ -71,22 +73,19 @@ if !isdir(output_dir)
     println("$output_dir created.")
 end
 
-
-#%% Extract neural data (THIS WAS MISSING!)
 println("Extracting neural data...")
-
 # Extract firing rates for condition 4 (column 10==1 & column 3==1 & column 4==4)
 trid = findall((cond_matrix[:, 10] .== 1) .& 
                (cond_matrix[:, 3] .== 1) .& 
                (cond_matrix[:, 4] .== 4))
-fr3 = neur_tensor_stim1on[1, :, trid]
+fr3 = neur_tensor_stim1on[ineuron, :, trid]
 println("  fr3 extracted: $(size(fr3)) from $(length(trid)) trials")
 
 # Extract firing rates for condition 5 (column 10==1 & column 3==1 & column 4==5)
 trid = findall((cond_matrix[:, 10] .== 1) .& 
                (cond_matrix[:, 3] .== 1) .& 
                (cond_matrix[:, 4] .== 5))
-fr4 = neur_tensor_stim1on[1, :, trid]
+fr4 = neur_tensor_stim1on[ineuron, :, trid]
 println("  fr4 extracted: $(size(fr4)) from $(length(trid)) trials")
 println()
 
