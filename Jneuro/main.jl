@@ -10,7 +10,7 @@ include("./auxiliary_functions.jl")  # Load filter function
 # ========== CONFIGURATION ==========
 # Define these BEFORE using them
 fs = 1000.0           # Sampling frequency (Hz)
-window_size = 300     # Filter window size
+window_size = 100     # Filter window size
 
 println("Configuration:")
 println("  Sampling frequency: $(fs) Hz")
@@ -20,6 +20,8 @@ println()
 # Load the .mat file
 data = matread("../data/amadeus01172020_a_neur_tensor_stim1on.mat")
 # Alternative file: amadeus01172020_a_neur_tensor_joyon.mat
+
+output_dir = "./neural_analysis_output"
 
 # 
 # ==== 1. Select filter type (change this to try different filters)
@@ -87,13 +89,13 @@ println()
 trid    = findall(cond_matrix[:, 10] .== 1)
 ta_att1 = cond_matrix[trid, 1]
 tp_att1 = cond_matrix[trid, 2]
-neural_plots_scatter(ta_att1, tp_att1, "1")
+neural_plots_scatter(ta_att1, tp_att1, "1", selected_filter; output_dir=output_dir)
 
 # Second subplot - find trials where column 12 == 1
 trid    = findall(cond_matrix[:, 12] .== 1)
 ta_att2 = cond_matrix[trid, 1]
 tp_att2 = cond_matrix[trid, 2]
-neural_plots_scatter(ta_att2, tp_att2, "2")
+neural_plots_scatter(ta_att2, tp_att2, "2", selected_filter; output_dir=output_dir)
 
 
 #%% Apply selected filter to neural data
@@ -137,7 +139,7 @@ if length(time_bins) != length(fr3_smooth)
     fr4_smooth = fr4_smooth[1:min_len]
     println("  Adjusted to length: $(min_len)")
 end
-neural_plots(time_bins, fr3_smooth, fr4_smooth, "1")
+neural_plots(time_bins, fr3_smooth, fr4_smooth, "1", selected_filter; output_dir=output_dir)
 
 println("\n✓ Neural data processed with $(selected_filter) filter")
 println("✓ Smoothed firing rates computed and plotted")
@@ -348,7 +350,6 @@ println("\n" * "="^70)
 
 # ===== SAVE RESULTS =====
 println("\nSaving results...")
-output_dir = "./neural_analysis_output"
 save_analysis_results(results, output_dir)
 
 println("\n✓ Complete! Results saved to: $output_dir")
