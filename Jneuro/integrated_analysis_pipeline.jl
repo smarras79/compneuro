@@ -18,6 +18,7 @@ using Printf
     analyze_neural_data_comprehensive(signal::Vector{Float64}, 
                                      behavioral_events=nothing;
                                      fs=1000.0,
+                                     output_dir="./neural_analysis_output",
                                      config=Dict())
 
 Comprehensive neural data analysis pipeline.
@@ -28,11 +29,13 @@ Comprehensive neural data analysis pipeline.
 3. Event-triggered analysis (if behavioral events provided)
 4. ML-based pattern detection and classification
 5. Generates comprehensive visualizations
+6. Saves all results to output_dir
 
 # Arguments
 - `signal`: Neural time series (LFP/single unit)
 - `behavioral_events`: Optional dict with "onset" and "offset" times
 - `fs`: Sampling frequency in Hz
+- `output_dir`: Directory where all results will be saved
 - `config`: Configuration dict (see default_analysis_config())
 
 # Returns
@@ -41,6 +44,7 @@ Dictionary with all analysis results
 function analyze_neural_data_comprehensive(signal::Vector{Float64},
                                           behavioral_events=nothing;
                                           fs=1000.0,
+                                          output_dir="./neural_analysis_output",
                                           config=Dict())
     
     # Merge with default config
@@ -296,6 +300,73 @@ function generate_analysis_plots(results, signal, fs, behavioral_events, config)
     
     plots_dict = Dict()
     
+    # Try to load enhanced visualization
+    has_enhanced_viz = false
+    enhanced_viz_path = joinpath(dirname(@__FILE__), "enhanced_visualization.jl")
+    
+    if isfile(enhanced_viz_path)
+        try
+            # Include the file if functions not already defined
+            if !isdefined(Main, :plot_signal_with_events)
+                include(enhanced_viz_path)
+            end
+            has_enhanced_viz = true
+        catch e
+            println("  ℹ️  Enhanced visualization loading failed: $e")
+            has_enhanced_viz = false
+        end
+    else
+        println("  ℹ️  enhanced_visualization.jl not found at: $enhanced_viz_path")
+    end
+    
+    # Generate time vector for enhanced plots
+    time = (0:length(signal)-1) ./ fs
+    swr_results = get(results, "swr_detection", nothing)
+    
+    # ===== ENHANCED PLOTS WITH BEHAVIORAL EVENTS =====
+    if has_enhanced_viz && !isnothing(behavioral_events)
+        println("  Creating enhanced visualizations with behavioral markers...")
+        
+        try
+            # 1. Signal with behavioral events marked
+            p = Main.plot_signal_with_events(time, signal, behavioral_events;
+                                            title="Neural Signal with Behavioral Events",
+                                            time_range=config["plot_time_range"],
+                                            swr_events=swr_results)
+            plots_dict["signal_with_events"] = p
+            println("    ✓ Signal with events")
+        catch e
+            println("    ✗ Signal with events failed: $e")
+            # Print more debug info
+            println("      Debug: time length = $(length(time))")
+            println("      Debug: signal length = $(length(signal))")
+            println("      Debug: behavioral_events type = $(typeof(behavioral_events))")
+        end
+        
+        try
+            # 2. Event-triggered average
+            p = Main.plot_event_triggered_average(time, signal, behavioral_events, swr_results;
+                                                 fs=fs)
+            plots_dict["event_triggered_average"] = p
+            println("    ✓ Event-triggered average")
+        catch e
+            println("    ✗ Event-triggered average failed: $e")
+        end
+        
+        try
+            # 3. Comprehensive summary figure
+            p = Main.create_summary_figure(time, signal, behavioral_events, swr_results;
+                                          time_range=config["plot_time_range"],
+                                          fs=fs)
+            plots_dict["summary_figure"] = p
+            println("    ✓ Summary figure")
+        catch e
+            println("    ✗ Summary figure failed: $e")
+        end
+    end
+    
+    # ===== STANDARD PLOTS =====
+    
     # 1. Power Spectral Density
     if haskey(results, "psd")
         psd_data = results["psd"]
@@ -305,14 +376,37 @@ function generate_analysis_plots(results, signal, fs, behavioral_events, config)
         plots_dict["psd"] = p
     end
     
-    # 2. Spectrogram
+    # 2. Spectrogram (enhanced with behavioral events if available)
     if haskey(results, "spectrogram")
         spec_data = results["spectrogram"]
-        p = plot_spectrogram(spec_data["times"], spec_data["frequencies"], 
-                            spec_data["power"];
-                            title="Time-Frequency Spectrogram",
-                            freq_range=config["plot_freq_range"])
-        plots_dict["spectrogram"] = p
+        
+        if has_enhanced_viz && !isnothing(behavioral_events)
+            try
+                p = plot_spectrogram_with_events(
+                    spec_data["times"], 
+                    spec_data["frequencies"], 
+                    spec_data["power"],
+                    behavioral_events;
+                    title="Time-Frequency Spectrogram with Events",
+                    freq_range=config["plot_freq_range"])
+                plots_dict["spectrogram_with_events"] = p
+                println("    ✓ Spectrogram with events")
+            catch e
+                println("    ✗ Spectrogram with events failed: $e")
+                # Fall back to standard
+                p = plot_spectrogram(spec_data["times"], spec_data["frequencies"], 
+                                    spec_data["power"];
+                                    title="Time-Frequency Spectrogram",
+                                    freq_range=config["plot_freq_range"])
+                plots_dict["spectrogram"] = p
+            end
+        else
+            p = plot_spectrogram(spec_data["times"], spec_data["frequencies"], 
+                                spec_data["power"];
+                                title="Time-Frequency Spectrogram",
+                                freq_range=config["plot_freq_range"])
+            plots_dict["spectrogram"] = p
+        end
     end
     
     # 3. SWR Events

@@ -4,13 +4,12 @@ using DSP
 using Plots
 
 include("./myplots.jl")
-include("./behavioral_event_extraction.jl")
 include("./auxiliary_functions.jl")  # Load filter function
 
 # ========== CONFIGURATION ==========
 # Define these BEFORE using them
 fs = 1000.0           # Sampling frequency (Hz)
-window_size = 100     # Filter window size
+window_size = 300     # Filter window size
 
 println("Configuration:")
 println("  Sampling frequency: $(fs) Hz")
@@ -21,7 +20,7 @@ println()
 data = matread("../data/amadeus01172020_a_neur_tensor_stim1on.mat")
 # Alternative file: amadeus01172020_a_neur_tensor_joyon.mat
 
-output_dir = "./neural_analysis_output"
+output_dir = "./neural_analysis_output"  # ← CHANGE THIS to your desired directory
 
 # 
 # ==== 1. Select filter type (change this to try different filters)
@@ -33,7 +32,7 @@ output_dir = "./neural_analysis_output"
 #                   :median
 #                   :exponential
 #
-selected_filter = :none #:moving_average  # Default: same as original code
+selected_filter = :moving_average  # Default: same as original code
 
 # Additional parameters for specific filters (adjust as needed)
 filter_params = Dict(
@@ -65,6 +64,13 @@ end
 println("Condition labels:")
 println(cond_label)
 println()
+
+# Create output_dir if not existing yet
+if !isdir(output_dir)
+    mkdir(output_dir)
+    println("$output_dir created.")
+end
+
 
 #%% Extract neural data (THIS WAS MISSING!)
 println("Extracting neural data...")
@@ -144,11 +150,22 @@ neural_plots(time_bins, fr3_smooth, fr4_smooth, "1", selected_filter; output_dir
 println("\n✓ Neural data processed with $(selected_filter) filter")
 println("✓ Smoothed firing rates computed and plotted")
 
+# ========== CONFIGURATION: OUTPUT DIRECTORY ==========
+# Define where all analysis results will be saved
+
+println("\n" * "="^70)
+println("OUTPUT CONFIGURATION")
+println("="^70)
+println("  All results will be saved to: $output_dir")
+println("="^70)
+
 #%% ===== EXTRACT BEHAVIORAL EVENTS (NEW!) =====
 println("\n" * "="^70)
 println("EXTRACTING BEHAVIORAL EVENTS")
 println("="^70)
 
+# Load behavioral event extraction helper
+include("./behavioral_event_extraction.jl")
 
 # Auto-detect which column likely contains motion/position data
 println("\nAuto-detecting motion column from behavioral data...")
@@ -205,6 +222,7 @@ println("This will:")
 println("  1. DETECT Sharp-Wave Ripples from neural signals")
 println("  2. Compare SWRs to behavioral events you extracted")
 println("  3. Calculate enrichment (are SWRs more common near behavior?)")
+println("  4. Save all results to: $output_dir")
 println()
 
 signal_filtered = fr3_smooth
@@ -213,6 +231,7 @@ results = analyze_neural_data_comprehensive(
     signal_filtered,
     behavioral_events;  # ← NOW USING EXTRACTED BEHAVIORAL EVENTS!
     fs=fs,
+    output_dir=output_dir,  # ← PASS USER-DEFINED OUTPUT DIRECTORY
     config=Dict(
         # SWR detection parameters
         "ripple_band" => (150.0, 250.0),
@@ -356,6 +375,9 @@ println("\n✓ Complete! Results saved to: $output_dir")
 println("\nGenerated files:")
 println("  - psd.png                # Power spectrum")
 println("  - spectrogram.png        # Time-frequency")
+println("  - signal_with_events.png # Signal with behavioral markers ⭐")
+println("  - event_triggered_average.png # Average response ⭐")
+println("  - summary_figure.png     # Comprehensive 3-panel ⭐")
 println("  - swr_events.png         # Example SWR events")
 println("  - ml_clustering.png      # SWR pattern types")
 println("  - frequency_bands.png    # Band power distribution")
