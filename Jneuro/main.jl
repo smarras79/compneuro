@@ -4,6 +4,7 @@ using DSP
 using Plots
 
 include("./myplots.jl")
+include("./behavioral_event_extraction.jl")
 include("./auxiliary_functions.jl")  # Load filter function
 
 # ========== CONFIGURATION ==========
@@ -146,8 +147,6 @@ println("\n" * "="^70)
 println("EXTRACTING BEHAVIORAL EVENTS")
 println("="^70)
 
-# Load behavioral event extraction helper
-include("./behavioral_event_extraction.jl")
 
 # Auto-detect which column likely contains motion/position data
 println("\nAuto-detecting motion column from behavioral data...")
