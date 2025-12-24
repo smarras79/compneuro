@@ -13,9 +13,15 @@ include("./auxiliary_functions.jl")  # Load filter function
 include("./multi_neuron_analysis.jl")
 include("./multi_neuron_plots.jl")
 
-# Import the modules
+# Import the modules and explicitly import types we'll use directly
 using .MultiNeuronAnalysis
 using .MultiNeuronPlots
+
+# Explicitly import types for direct use in Main scope
+using .MultiNeuronAnalysis: NeuronSelection, ComparativeMetrics, 
+                           compute_comparative_metrics, get_summary_statistics
+using .MultiNeuronPlots: plot_comparative_firing_rates, plot_temporal_dynamics,
+                         create_comparative_report
 
 # ========== CONFIGURATION ==========
 # Define these BEFORE using them
@@ -591,3 +597,276 @@ println("""
    - Adjust swr_threshold_sd for detection sensitivity (line 212)
 """)
 println("="^70)
+
+#------------------------------------------------------------------------
+#%% ===== MULTI-NEURON COMPARATIVE ANALYSIS =====
+#------------------------------------------------------------------------
+println("\n" * "="^70)
+println("MULTI-NEURON COMPARATIVE ANALYSIS")
+println("="^70)
+
+# Configuration for multi-neuron analysis
+ENABLE_MULTI_NEURON = true  # Set to false to skip this section
+neurons_to_analyze = [1, 2, 3, 5, 7, 13, 15, 19, 21, 27, 28, 31]  # Customize this list
+
+if ENABLE_MULTI_NEURON
+    println("\nAnalyzing $(length(neurons_to_analyze)) neurons...")
+    println("Selected neurons: $neurons_to_analyze")
+    
+    # Get total number of neurons available
+    n_total_neurons = size(neur_tensor_stim1on, 1)
+    println("Total neurons in dataset: $n_total_neurons")
+    
+    # Filter to only include neurons that exist in the data
+    valid_neurons = filter(n -> 1 <= n <= n_total_neurons, neurons_to_analyze)
+    
+    if length(valid_neurons) < length(neurons_to_analyze)
+        println("⚠️  Warning: Some requested neurons don't exist in dataset")
+        println("   Valid neurons: $valid_neurons")
+    end
+    
+    if length(valid_neurons) >= 2
+        println("\n--- Step 1: Extracting Firing Rates ---")
+        
+        # Extract firing rates for selected neurons (using same condition as before)
+        # Condition: column 10==1 & column 3==1 & column 4==4
+        trid_multi = findall((cond_matrix[:, 10] .== 1) .& 
+                            (cond_matrix[:, 3] .== 1) .& 
+                            (cond_matrix[:, 4] .== 4))
+        
+        n_neurons_selected = length(valid_neurons)
+        n_time_points = size(neur_tensor_stim1on, 2)
+        
+        # Create matrix to hold all neuron firing rates
+        # Rows: time points, Columns: neurons
+        all_firing_rates = zeros(n_time_points, n_neurons_selected)
+        
+        for (i, neuron_id) in enumerate(valid_neurons)
+            # Extract and average across trials for this neuron
+            fr_neuron = neur_tensor_stim1on[neuron_id, :, trid_multi]
+            all_firing_rates[:, i] = vec(mean(fr_neuron, dims=2))
+        end
+        
+        println("  ✓ Extracted firing rates: $(size(all_firing_rates))")
+        
+        # Apply same filtering as used for single neuron
+        println("\n--- Step 2: Applying $(selected_filter) Filter ---")
+        
+        # First, filter one neuron to get the output size
+        first_filtered = apply_neural_filter(
+            all_firing_rates[:, 1], 
+            selected_filter, 
+            window_size; 
+            filter_params...
+        )
+        
+        # Pre-allocate matrix with correct dimensions
+        filtered_length = length(first_filtered)
+        firing_rates_smoothed = zeros(filtered_length, n_neurons_selected)
+        firing_rates_smoothed[:, 1] = first_filtered
+        
+        # Filter remaining neurons
+        for i in 2:n_neurons_selected
+            firing_rates_smoothed[:, i] = apply_neural_filter(
+                all_firing_rates[:, i], 
+                selected_filter, 
+                window_size; 
+                filter_params...
+            )
+        end
+        
+        println("  ✓ Filtered all $(n_neurons_selected) neurons")
+        println("  Signal length: $(size(all_firing_rates, 1)) → $(filtered_length)")
+        
+        # Adjust time bins to match filtered data
+        additional_trim_multi = (size(all_firing_rates, 1) - size(firing_rates_smoothed, 1)) ÷ 2
+        time_start_multi = 150 + additional_trim_multi
+        time_end_multi = length(edges) - 150 - additional_trim_multi
+        time_bins_multi = edges[time_start_multi:time_end_multi]
+        
+        # Ensure lengths match
+        if length(time_bins_multi) != size(firing_rates_smoothed, 1)
+            min_len = min(length(time_bins_multi), size(firing_rates_smoothed, 1))
+            time_bins_multi = time_bins_multi[1:min_len]
+            firing_rates_smoothed = firing_rates_smoothed[1:min_len, :]
+        end
+        
+        # Convert time to milliseconds for analysis
+        time_ms = time_bins_multi .* 1000.0  # Convert seconds to milliseconds
+        
+        println("\n--- Step 3: Creating Neuron Selection ---")
+        selection = NeuronSelection(valid_neurons)
+        println("  ✓ Selected $(length(selection.neuron_ids)) neurons")
+        
+        println("\n--- Step 4: Computing Comparative Metrics ---")
+        # Transpose firing rates to match expected format (time × neurons)
+        metrics = compute_comparative_metrics(
+            selection, 
+            firing_rates_smoothed, 
+            time_ms
+        )
+        
+        println("  ✓ Metrics computed")
+        
+        # Display TMI values
+        println("\n📊 Temporal Modulation Index (TMI) by Neuron:")
+        for (i, neuron_id) in enumerate(selection.neuron_ids)
+            tmi = metrics.tmi_values[i]
+            mean_fr = metrics.mean_firing_rates[i]
+            peak_fr = metrics.peak_firing_rates[i]
+            println(@sprintf("  Neuron %2d: TMI=%.3f  Mean FR=%.2f Hz  Peak FR=%.2f Hz", 
+                            neuron_id, tmi, mean_fr, peak_fr))
+        end
+        
+        # Summary statistics
+        println("\n📈 Population Statistics:")
+        summary = get_summary_statistics(metrics)
+        println(@sprintf("  Mean TMI:         %.3f ± %.3f", 
+                        summary["mean_tmi"], summary["std_tmi"]))
+        println(@sprintf("  Mean Firing Rate: %.2f Hz", 
+                        summary["mean_firing_rate"]))
+        println(@sprintf("  Mean Correlation: %.3f", 
+                        summary["mean_correlation"]))
+        
+        # Identify interesting neurons
+        println("\n🎯 Notable Neurons:")
+        sorted_idx = sortperm(metrics.tmi_values, rev=true)
+        println("  Highest TMI (most variable):")
+        for i in 1:min(3, length(sorted_idx))
+            idx = sorted_idx[i]
+            neuron_id = selection.neuron_ids[idx]
+            tmi = metrics.tmi_values[idx]
+            println(@sprintf("    Neuron %2d: TMI=%.3f", neuron_id, tmi))
+        end
+        
+        println("  Lowest TMI (most stable):")
+        for i in length(sorted_idx):-1:max(1, length(sorted_idx)-2)
+            idx = sorted_idx[i]
+            neuron_id = selection.neuron_ids[idx]
+            tmi = metrics.tmi_values[idx]
+            println(@sprintf("    Neuron %2d: TMI=%.3f", neuron_id, tmi))
+        end
+        
+        println("\n--- Step 5: Generating Comparative Plots ---")
+        
+        # Create multi-neuron output directory
+        multi_output_dir = joinpath(output_dir, "multi_neuron_analysis")
+        if !isdir(multi_output_dir)
+            mkpath(multi_output_dir)
+        end
+        
+        # Generate comprehensive report with all plots
+        create_comparative_report(
+            metrics, 
+            firing_rates_smoothed, 
+            time_ms, 
+            multi_output_dir
+        )
+        
+        println("  ✓ All comparative plots generated")
+        
+        # Generate individual plots with custom settings
+        println("\n--- Step 6: Creating Custom Visualizations ---")
+        
+        # 1. Main comparative plot (like the example figure)
+        # Adjust layout based on number of neurons
+        n_cols = 4
+        n_rows = ceil(Int, length(selection.neuron_ids) / n_cols)
+        
+        plot_comparative_firing_rates(
+            selection,
+            firing_rates_smoothed,
+            time_ms,
+            metrics.tmi_values,
+            layout_dims=(n_rows, n_cols),
+            sort_by_tmi=true,
+            figsize=(1400, 300*n_rows),
+            save_path=joinpath(multi_output_dir, "comparative_firing_rates_sorted.png")
+        )
+        println("  ✓ Comparative firing rates plot (sorted by TMI)")
+        
+        # 2. Highlight specific neurons of interest
+        if length(selection.neuron_ids) > 4
+            # Highlight top 3 high-TMI neurons
+            highlight_idx = sortperm(metrics.tmi_values, rev=true)[1:min(3, length(selection.neuron_ids))]
+            highlight_neurons = selection.neuron_ids[highlight_idx]
+            
+            plot_temporal_dynamics(
+                selection,
+                firing_rates_smoothed,
+                time_ms,
+                highlight_neurons,
+                save_path=joinpath(multi_output_dir, "temporal_dynamics_highlighted.png")
+            )
+            println("  ✓ Temporal dynamics with highlighted neurons")
+        end
+        
+        # 3. Additional correlation analysis
+        println("\n📊 Cross-Neuron Correlation Analysis:")
+        local n_pairs = 0  # Declare as local to avoid scope ambiguity
+        strong_correlations = []
+        
+        for i in 1:length(selection.neuron_ids)
+            for j in (i+1):length(selection.neuron_ids)
+                corr = metrics.correlation_matrix[i, j]
+                if abs(corr) > 0.7  # Strong correlation threshold
+                    n_pairs += 1
+                    push!(strong_correlations, (
+                        selection.neuron_ids[i], 
+                        selection.neuron_ids[j], 
+                        corr
+                    ))
+                end
+            end
+        end
+        
+        if n_pairs > 0
+            println("  Found $n_pairs strongly correlated neuron pairs (|r| > 0.7):")
+            for (n1, n2, corr) in sort(strong_correlations, by=x->abs(x[3]), rev=true)[1:min(5, n_pairs)]
+                println(@sprintf("    Neurons %2d ↔ %2d: r = %+.3f", n1, n2, corr))
+            end
+        else
+            println("  No strongly correlated pairs found (threshold |r| > 0.7)")
+        end
+        
+        # 4. Burst analysis summary
+        println("\n🔥 Burst Analysis Summary:")
+        total_bursts = sum(metrics.burst_characteristics[nid]["n_bursts"] 
+                          for nid in selection.neuron_ids)
+        println("  Total bursts detected: $total_bursts")
+        
+        if total_bursts > 0
+            println("  Bursts by neuron:")
+            for neuron_id in selection.neuron_ids
+                n_bursts = metrics.burst_characteristics[neuron_id]["n_bursts"]
+                if n_bursts > 0
+                    mean_dur = metrics.burst_characteristics[neuron_id]["mean_duration"]
+                    mean_peak = metrics.burst_characteristics[neuron_id]["mean_peak_rate"]
+                    println(@sprintf("    Neuron %2d: %d bursts, %.1f ms duration, %.1f Hz peak", 
+                                    neuron_id, n_bursts, mean_dur, mean_peak))
+                end
+            end
+        end
+        
+        println("\n✓ Multi-neuron analysis complete!")
+        println("\n📁 Results saved to: $multi_output_dir")
+        println("\nGenerated comparative analysis files:")
+        println("  - comparative_firing_rates.png          # Grid layout with all neurons")
+        println("  - comparative_firing_rates_sorted.png   # Sorted by TMI")
+        println("  - correlation_matrix.png                # Neuron correlation heatmap")
+        println("  - tmi_distribution.png                  # TMI distribution")
+        println("  - burst_comparison.png                  # Burst statistics")
+        println("  - temporal_dynamics.png                 # All neurons overlaid")
+        println("  - temporal_dynamics_highlighted.png     # Highlight top neurons")
+        println("  - summary_statistics.png                # Metric relationships")
+        
+    else
+        println("⚠️  Need at least 2 valid neurons for comparative analysis")
+        println("   Requested: $neurons_to_analyze")
+        println("   Valid: $valid_neurons")
+    end
+else
+    println("Multi-neuron analysis disabled (set ENABLE_MULTI_NEURON = true to enable)")
+end
+
+println("\n" * "="^70)

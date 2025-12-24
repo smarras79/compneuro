@@ -312,11 +312,11 @@ function generate_analysis_plots(results, signal, fs, behavioral_events, config)
             end
             has_enhanced_viz = true
         catch e
-            println("  ℹ️  Enhanced visualization loading failed: $e")
+            println("    Enhanced visualization loading failed: $e")
             has_enhanced_viz = false
         end
     else
-        println("  ℹ️  enhanced_visualization.jl not found at: $enhanced_viz_path")
+        println("    enhanced_visualization.jl not found at: $enhanced_viz_path")
     end
     
     # Generate time vector for enhanced plots
