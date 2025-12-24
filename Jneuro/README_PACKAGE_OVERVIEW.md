@@ -83,16 +83,11 @@ A complete, professional-grade neural analysis toolkit for detecting Sharp-Wave 
    - Automatic length adjustment
    - Parameter optimization
 
-7. **`myplots.jl`** - Custom plotting functions
-   - Neural activity visualization
-   - Behavioral scatter plots
-   - Multi-condition comparisons
-
 ---
 
 ### 🎯 Event Extraction
 
-8. **`behavioral_event_extraction.jl`** - Automatic event detection (~300 lines)
+7. **`behavioral_event_extraction.jl`** - Automatic event detection (~300 lines)
    - Auto-detects motion/position columns
    - Extracts motion onset/offset times
    - Position-change based detection
@@ -104,41 +99,41 @@ A complete, professional-grade neural analysis toolkit for detecting Sharp-Wave 
 
 ### 📚 Documentation
 
-9. **`GETTING_STARTED.md`** ⭐ - START HERE!
+8. **`GETTING_STARTED.md`** ⭐ - START HERE!
    - Step-by-step walkthrough
    - Configuration guide
    - Complete workflow explanation
    - Troubleshooting tips
 
-10. **`README_PACKAGE_OVERVIEW.md`** - This file
+9. **`README_PACKAGE_OVERVIEW.md`** - This file
     - Package structure
     - File descriptions
     - Quick reference
 
-11. **`NEURAL_ANALYSIS_GUIDE.md`** - In-depth guide
+10. **`NEURAL_ANALYSIS_GUIDE.md`** - In-depth guide
     - Scientific background
     - Algorithm details
     - Parameter tuning
     - Advanced usage
 
-12. **`DATA_LOADING_GUIDE.md`** - Data extraction
+11. **`DATA_LOADING_GUIDE.md`** - Data extraction
     - MAT file structure
     - Condition extraction
     - Trial selection
     - Data preprocessing
 
-13. **`FILTERING_GUIDE.md`** - Signal filtering
+12. **`FILTERING_GUIDE.md`** - Signal filtering
     - Filter comparison
     - When to use each filter
     - Parameter selection
     - Examples
 
-14. **`TROUBLESHOOTING.md`** - Common issues
+13. **`TROUBLESHOOTING.md`** - Common issues
     - Error messages
     - Solutions
     - Debugging tips
 
-15. **`QUICK_REFERENCE.md`** - One-page cheat sheet
+14. **`QUICK_REFERENCE.md`** - One-page cheat sheet
     - Key functions
     - Essential parameters
     - Quick examples
