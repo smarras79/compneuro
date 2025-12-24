@@ -2,44 +2,48 @@ using MAT
 using Statistics
 using DSP
 using Plots
+using Printf
 
-include("./myplots.jl")
+include("./enhanced_visualization.jl")
 include("./auxiliary_functions.jl")  # Load filter function
 
 # ========== CONFIGURATION ==========
 # Define these BEFORE using them
-fs = 1000.0           # Sampling frequency (Hz)
+fs = 1000.0           # Sampling frequency (Hz) - MUST MATCH YOUR RECORDING SYSTEM
 window_size = 300     # Filter window size
 ineuron = 1
 
 println("Configuration:")
 println("  Sampling frequency: $(fs) Hz")
 println("  Window size: $(window_size)")
-println("  Neuron number: $(ineuron)")
+println("  Neuron $(ineuron)")
 println()
 
 # Load the .mat file
-data = matread("../data/amadeus01172020_a_neur_tensor_stim1on.mat")
+data = matread("./data/amadeus01172020_a_neur_tensor_stim1on.mat")
 # Alternative file: amadeus01172020_a_neur_tensor_joyon.mat
+output_dir = "./neural_analysis_output"
 
-output_dir = "./neural_analysis_output"  # ← CHANGE THIS to your desired directory
 
-# 
+#------------------------------------------------------------------------
 # ==== 1. Select filter type (change this to try different filters)
 #         Options:
+#                   :none              # NEW: No filtering (raw signal)
 #                   :moving_average
 #                   :gaussian
 #                   :savitzky_golay
 #                   :butterworth
 #                   :median
 #                   :exponential
-#
+#------------------------------------------------------------------------
 selected_filter = :moving_average  # Default: same as original code
 
-# Additional parameters for specific filters (adjust as needed)
+#------------------------------------------------------------------------
+# Additional parameters for specific filters (adjust as needed
+#------------------------------------------------------------------------
 filter_params = Dict(
     :cutoff_freq => 0.05,              # For Butterworth (Hz)
-    :fs => 1000.0,                     # Sampling frequency (Hz)
+    :fs => 1.0,                        # Sampling frequency (Hz)
     :filter_order => 4,                # Butterworth order
     :poly_order => 3,                  # Savitzky-Golay polynomial order
     :alpha => 0.05,                    # Exponential MA smoothing factor
@@ -62,26 +66,53 @@ else
     stim1on
 end
 
+#------------------------------------------------------------------------
 # Display condition labels (tells you which column codes for what task parameter)
+#------------------------------------------------------------------------
 println("Condition labels:")
 println(cond_label)
 println()
 
-# Create output_dir if not existing yet
-if !isdir(output_dir)
-    mkdir(output_dir)
-    println("$output_dir created.")
+#------------------------------------------------------------------------
+#%% OPTIONAL: Shift time base to start at t=0
+# Set this to true if you want absolute time (starting at 0)
+# Set to false to keep event-relative time (e.g., -2 to +2 seconds around stimulus)
+#------------------------------------------------------------------------
+SHIFT_TIME_TO_ZERO = false  # Change to true if you want t=0 start
+
+if SHIFT_TIME_TO_ZERO && edges[1] < 0
+    println("\n" * "="^70)
+    println("SHIFTING TIME BASE TO START AT t=0")
+    println("="^70)
+    
+    time_shift = -edges[1]
+    edges_original = copy(edges)
+    edges = edges .+ time_shift
+    
+    println("Original time: $(round(edges_original[1], digits=3)) to $(round(edges_original[end], digits=3)) s")
+    println("New time: $(round(edges[1], digits=3)) to $(round(edges[end], digits=3)) s")
+    println("Shift applied: +$(round(time_shift, digits=3)) s")
+    println("="^70)
+    println()
 end
 
+#------------------------------------------------------------------------
+#%% Extract neural data
+#------------------------------------------------------------------------
 println("Extracting neural data...")
+
+#------------------------------------------------------------------------
 # Extract firing rates for condition 4 (column 10==1 & column 3==1 & column 4==4)
+#------------------------------------------------------------------------
 trid = findall((cond_matrix[:, 10] .== 1) .& 
                (cond_matrix[:, 3] .== 1) .& 
                (cond_matrix[:, 4] .== 4))
 fr3 = neur_tensor_stim1on[ineuron, :, trid]
 println("  fr3 extracted: $(size(fr3)) from $(length(trid)) trials")
 
+#------------------------------------------------------------------------
 # Extract firing rates for condition 5 (column 10==1 & column 3==1 & column 4==5)
+#------------------------------------------------------------------------
 trid = findall((cond_matrix[:, 10] .== 1) .& 
                (cond_matrix[:, 3] .== 1) .& 
                (cond_matrix[:, 4] .== 5))
@@ -89,7 +120,13 @@ fr4 = neur_tensor_stim1on[ineuron, :, trid]
 println("  fr4 extracted: $(size(fr4)) from $(length(trid)) trials")
 println()
 
+if !isdir(output_dir)
+    mkdir(output_dir)
+end
+
+#------------------------------------------------------------------------
 #%% Behavioural data
+#------------------------------------------------------------------------
 # Find trials where column 10 == 1
 trid    = findall(cond_matrix[:, 10] .== 1)
 ta_att1 = cond_matrix[trid, 1]
@@ -102,8 +139,9 @@ ta_att2 = cond_matrix[trid, 1]
 tp_att2 = cond_matrix[trid, 2]
 neural_plots_scatter(ta_att2, tp_att2, "2", selected_filter; output_dir=output_dir)
 
-
+#------------------------------------------------------------------------
 #%% Apply selected filter to neural data
+#------------------------------------------------------------------------
 # Compute mean firing rates across trials first
 fr3_mean = vec(mean(fr3, dims=2))
 fr4_mean = vec(mean(fr4, dims=2))
@@ -122,10 +160,12 @@ println("Filtered signal lengths:")
 println("  fr3_smooth: $(length(fr3_smooth))")
 println("  fr4_smooth: $(length(fr4_smooth))")
 
+#------------------------------------------------------------------------
 # Plot neural data and save to file
 # Time bins need to match the filtered signal length
 # The filtered signals are trimmed by (window_size - 1) total samples
 # Original code used edges[150:end-150], but we need to account for filter trimming
+#------------------------------------------------------------------------
 additional_trim = (length(fr3_mean) - length(fr3_smooth)) ÷ 2
 
 time_start = 150 + additional_trim
@@ -149,16 +189,9 @@ neural_plots(time_bins, fr3_smooth, fr4_smooth, "1", selected_filter; output_dir
 println("\n✓ Neural data processed with $(selected_filter) filter")
 println("✓ Smoothed firing rates computed and plotted")
 
-# ========== CONFIGURATION: OUTPUT DIRECTORY ==========
-# Define where all analysis results will be saved
-
-println("\n" * "="^70)
-println("OUTPUT CONFIGURATION")
-println("="^70)
-println("  All results will be saved to: $output_dir")
-println("="^70)
-
-#%% ===== EXTRACT BEHAVIORAL EVENTS (NEW!) =====
+#------------------------------------------------------------------------
+#%% ===== EXTRACT BEHAVIORAL EVENTS =====
+#------------------------------------------------------------------------
 println("\n" * "="^70)
 println("EXTRACTING BEHAVIORAL EVENTS")
 println("="^70)
@@ -208,6 +241,93 @@ else
     end
 end
 
+#------------------------------------------------------------------------
+#%% ===== FIX TIME ALIGNMENT (NEW!) =====
+#------------------------------------------------------------------------
+println("\n" * "="^70)
+println("CHECKING TIME ALIGNMENT")
+println("="^70)
+
+#------------------------------------------------------------------------
+# CRITICAL: Use time_bins (filtered signal time base), not edges!
+#------------------------------------------------------------------------
+neural_start = time_bins[1]
+neural_end = time_bins[end]
+
+println("Filtered neural signal:")
+println("  Start: $(round(neural_start, digits=3)) s")
+println("  End: $(round(neural_end, digits=3)) s")
+println("  Duration: $(round(neural_end - neural_start, digits=2)) s")
+println("  Number of time points: $(length(time_bins))")
+
+# Find earliest behavioral event - FIX SCOPING
+min_event_time = Inf
+max_event_time = -Inf
+has_negative = false
+
+# Collect all event times
+for (event_type, times) in behavioral_events
+    if event_type != "n_events" && times isa Vector && length(times) > 0
+        global min_event_time = min(min_event_time, minimum(times))
+        global max_event_time = max(max_event_time, maximum(times))
+        if any(times .< neural_start)
+            global has_negative = true
+        end
+    end
+end
+
+if !isinf(min_event_time)
+    println("\nBehavioral events:")
+    println("  First event: $(round(min_event_time, digits=3)) s")
+    println("  Last event: $(round(max_event_time, digits=3)) s")
+end
+
+# Check if behavioral events are outside the FILTERED signal bounds
+# (not the original edges, which are longer!)
+n_events_outside = 0
+for (event_type, times) in behavioral_events
+    if event_type != "n_events" && times isa Vector
+        global n_events_outside += sum((times .< neural_start) .| (times .> neural_end))
+    end
+end
+
+if n_events_outside > 0
+    println("\n⚠️  TIME ALIGNMENT ISSUE DETECTED!")
+    println("   $(n_events_outside) behavioral events are outside filtered signal bounds")
+    println("   This is because filtering trimmed the signal edges")
+    println("   Filtering only events within filtered signal range...")
+    
+    # Remove events outside the filtered signal bounds
+    for (event_type, times) in behavioral_events
+        if event_type != "n_events" && times isa Vector
+            n_before = length(times)
+            valid_indices = (times .>= neural_start) .& (times .<= neural_end)
+            behavioral_events[event_type] = times[valid_indices]
+            n_after = length(behavioral_events[event_type])
+            n_removed = n_before - n_after
+            
+            if n_removed > 0
+                println("   $(event_type): kept $(n_after)/$(n_before) events (removed $(n_removed))")
+            end
+        end
+    end
+    
+    # Update total count
+    total_events = 0
+    for (event_type, times) in behavioral_events
+        if event_type != "n_events" && times isa Vector
+            global total_events += length(times)
+        end
+    end
+    behavioral_events["n_events"] = total_events
+    
+    println("\n✓ Events filtered to match signal bounds")
+    println("   Total valid events: $(total_events)")
+    
+else
+    println("\n✓ All events within filtered signal bounds")
+end
+
 println("="^70)
 
 # ===== LOAD ANALYSIS TOOLS =====
@@ -215,22 +335,84 @@ println("\n[Loading Analysis Pipeline]")
 include("./integrated_analysis_pipeline.jl")
 println("  ✓ Pipeline loaded")
 
+# ===== PRECOMPILE VISUALIZATION FUNCTIONS (FIX FOR FIRST-RUN ERROR) =====
+# Julia needs to compile functions with keyword arguments on first use
+# This "warm-up" call ensures they're ready before actual use
+try
+    # Dummy call to trigger compilation of plot_signal_with_events
+    if isdefined(Main, :plot_signal_with_events)
+        # Create minimal dummy data
+        dummy_time = [0.0, 1.0]
+        dummy_signal = [0.0, 1.0]
+        dummy_events = Dict("test" => [0.5])
+        # Call with keywords to trigger kwcall compilation
+        plot_signal_with_events(dummy_time, dummy_signal, dummy_events; 
+                               title="warmup", time_range=(0.0, 1.0))
+        println("  ✓ Visualization functions precompiled")
+    end
+catch e
+    # Silently ignore - function will still work on actual use
+end
+
 # ===== RUN COMPREHENSIVE ANALYSIS =====
 println("\n[Running Comprehensive Neural Analysis]")
 println("This will:")
 println("  1. DETECT Sharp-Wave Ripples from neural signals")
 println("  2. Compare SWRs to behavioral events you extracted")
 println("  3. Calculate enrichment (are SWRs more common near behavior?)")
-println("  4. Save all results to: $output_dir")
 println()
 
 signal_filtered = fr3_smooth
 
+# ===== CRITICAL: SHIFT EVENTS TO MATCH SWR DETECTION TIME BASE =====
+println("\n🔧 SHIFTING EVENT TIMES TO MATCH SWR DETECTION")
+time_offset = time_bins[1]  # Get start time of filtered signal (e.g., -1.7s)
+println("   Time offset: $(round(time_offset, digits=3))s")
+println("   Shifting all events by $(round(-time_offset, digits=3))s")
+
+# Create NEW dictionary with shifted times
+behavioral_events_shifted = Dict{String, Any}()
+
+for (event_type, times) in behavioral_events
+    if event_type == "n_events"
+        continue  # Will recalculate
+    elseif times isa Vector && length(times) > 0
+        # Shift: convert from time_bins scale to 0-based scale
+        shifted_times = times .- time_offset
+        behavioral_events_shifted[event_type] = shifted_times
+        
+        println("   $(event_type): $(round(minimum(shifted_times), digits=3))s to $(round(maximum(shifted_times), digits=3))s")
+    end
+end
+
+# Recalculate total
+total = sum(length(v) for (k, v) in behavioral_events_shifted if v isa Vector)
+behavioral_events_shifted["n_events"] = total
+
+# REPLACE the original with shifted version
+behavioral_events = behavioral_events_shifted
+
+# VERIFY the shift worked
+println("\n📋 VERIFICATION:")
+for (event_type, times) in behavioral_events
+    if event_type != "n_events" && times isa Vector && length(times) > 0
+        min_t = minimum(times)
+        max_t = maximum(times)
+        println("   $(event_type): min=$(round(min_t, digits=3))s, max=$(round(max_t, digits=3))s")
+        
+        if min_t < 0
+            error("❌ SHIFT FAILED! Events still negative!")
+        end
+    end
+end
+println("✓ All events successfully shifted to [0, $(round(length(signal_filtered)/fs, digits=1))]s range")
+println("="^70)
+println()
+
 results = analyze_neural_data_comprehensive(
     signal_filtered,
-    behavioral_events;  # ← NOW USING EXTRACTED BEHAVIORAL EVENTS!
+    behavioral_events;  # Now using SHIFTED behavioral events
     fs=fs,
-    output_dir=output_dir,  # ← PASS USER-DEFINED OUTPUT DIRECTORY
     config=Dict(
         # SWR detection parameters
         "ripple_band" => (150.0, 250.0),
@@ -374,9 +556,6 @@ println("\n✓ Complete! Results saved to: $output_dir")
 println("\nGenerated files:")
 println("  - psd.png                # Power spectrum")
 println("  - spectrogram.png        # Time-frequency")
-println("  - signal_with_events.png # Signal with behavioral markers ⭐")
-println("  - event_triggered_average.png # Average response ⭐")
-println("  - summary_figure.png     # Comprehensive 3-panel ⭐")
 println("  - swr_events.png         # Example SWR events")
 println("  - ml_clustering.png      # SWR pattern types")
 println("  - frequency_bands.png    # Band power distribution")
@@ -388,15 +567,17 @@ println("="^70)
 println("""
 1. NEURAL EVENTS (SWRs): Detected by algorithm from neural signals
 2. BEHAVIORAL EVENTS (motion): Extracted from your behavioral recordings
-3. COMPARISON: Check enrichment factors above
+3. TIME ALIGNMENT: Automatically corrected if needed
+4. COMPARISON: Check enrichment factors above
    - Enrichment > 1.5: SWRs occur MORE during behavior
    - Enrichment ~ 1.0: No special relationship
    - Enrichment < 0.7: SWRs occur LESS during behavior
 
-4. Next steps:
+5. Next steps:
    - Review plots to verify SWR quality
    - Check if behavioral extraction was successful
    - Try different position_column if needed (line 166)
    - Adjust threshold_quantile for sensitivity (line 167)
+   - Adjust swr_threshold_sd for detection sensitivity (line 212)
 """)
 println("="^70)
