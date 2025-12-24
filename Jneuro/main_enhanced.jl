@@ -6,22 +6,31 @@ using Plots
 using Colors
 using Printf
 using LaTeXStrings
+using Revise
 
 include("./enhanced_visualization.jl")
 include("./auxiliary_functions.jl")  # Load filter function
+include("./data_inspector.jl")  # Load data inspection utility
 
 include("./multi_neuron_analysis.jl")
 include("./multi_neuron_plots.jl")
+include("./multi_neuron_swr.jl")
+include("./multi_neuron_swr_plots.jl")
 
 # Import the modules and explicitly import types we'll use directly
 using .MultiNeuronAnalysis
 using .MultiNeuronPlots
+using .MultiNeuronSWR
+using .MultiNeuronSWRPlots
+using .DataInspector
 
 # Explicitly import types for direct use in Main scope
 using .MultiNeuronAnalysis: NeuronSelection, ComparativeMetrics, 
                            compute_comparative_metrics, get_summary_statistics
 using .MultiNeuronPlots: plot_comparative_firing_rates, plot_temporal_dynamics,
                          create_comparative_report
+using .MultiNeuronSWR: compare_swr_across_neurons, identify_co_rippling_neurons
+using .MultiNeuronSWRPlots: create_swr_report, plot_swr_comparison
 
 # ========== CONFIGURATION ==========
 # Define these BEFORE using them
@@ -29,10 +38,14 @@ fs = 1000.0           # Sampling frequency (Hz) - MUST MATCH YOUR RECORDING SYST
 window_size = 300     # Filter window size
 ineuron = 1
 
+# Data inspection configuration
+ENABLE_DATA_INSPECTION = true  # Set to false to skip inspection and pause
+
 println("Configuration:")
 println("  Sampling frequency: $(fs) Hz")
 println("  Window size: $(window_size)")
 println("  Neuron $(ineuron)")
+println("  Data inspection: $(ENABLE_DATA_INSPECTION ? "enabled" : "disabled")")
 println()
 
 # Load the .mat file
@@ -40,6 +53,23 @@ data = matread("./data/amadeus01172020_a_neur_tensor_stim1on.mat")
 # Alternative file: amadeus01172020_a_neur_tensor_joyon.mat
 output_dir = "./neural_analysis_output"
 
+#------------------------------------------------------------------------
+#%% DATA INSPECTION - Review file contents before proceeding
+#------------------------------------------------------------------------
+if ENABLE_DATA_INSPECTION
+    # Inspect the loaded MAT file to understand its structure
+    inspect_mat_file(data)
+    
+    # Validate that expected variables are present
+    expected_variables = ["cond_label", "cond_matrix", "neur_tensor_stim1on", "stim1on"]
+    validate_expected_variables(data, expected_variables)
+    
+    # Pause for user confirmation before proceeding with analysis
+    pause_for_confirmation(prompt="Continue with analysis?")
+else
+    println("Data inspection disabled - proceeding directly with analysis...")
+    println()
+end
 
 #------------------------------------------------------------------------
 # ==== 1. Select filter type (change this to try different filters)
@@ -848,6 +878,129 @@ if ENABLE_MULTI_NEURON
             end
         end
         
+        #--------------------------------------------------------------------
+        #%% SHARP-WAVE RIPPLE DETECTION AND ANALYSIS
+        #--------------------------------------------------------------------
+        println("\n" * "="^70)
+        println("SHARP-WAVE RIPPLE (SWR) DETECTION")
+        println("="^70)
+        
+        # Configuration for SWR detection
+        ENABLE_SWR_DETECTION = true  # Set to false to skip SWR analysis
+        
+        if ENABLE_SWR_DETECTION
+            println("\nDetecting SWRs for all selected neurons...")
+            println("Configuration:")
+            println("  Ripple band: 150-250 Hz")
+            println("  Threshold: 3.0 SD")
+            println("  Duration range: 30-200 ms")
+            
+            try
+                # Detect SWRs across all neurons
+                println("\n--- SWR Detection ---")
+                swr_metrics = compare_swr_across_neurons(
+                    firing_rates_smoothed,
+                    time_ms,
+                    selection.neuron_ids,
+                    fs;  # Use the sampling frequency from configuration
+                    ripple_band=(150.0, 250.0),
+                    threshold_sd=3.0,
+                    min_duration_ms=30.0,
+                    max_duration_ms=200.0,
+                    co_ripple_window_ms=50.0
+                )
+                
+                println("\n✓ SWR detection complete!")
+                
+                # Display SWR summary
+                println("\n📊 SWR Summary by Neuron:")
+                total_swrs = sum(swr_metrics.swr_counts)
+                println("  Total SWRs detected: $total_swrs")
+                println()
+                
+                for (i, neuron_id) in enumerate(selection.neuron_ids)
+                    count = swr_metrics.swr_counts[i]
+                    rate = swr_metrics.swr_rates[i]
+                    dur = swr_metrics.mean_durations[i]
+                    freq = swr_metrics.mean_frequencies[i]
+                    sync = swr_metrics.synchrony_scores[i]
+                    
+                    println(@sprintf("  Neuron %2d: %3d SWRs  |  %.2f Hz  |  %.1f ms  |  %.1f Hz peak  |  Sync=%.3f",
+                                    neuron_id, count, rate, dur, freq, sync))
+                end
+                
+                # Identify neurons with highest SWR activity
+                println("\n🎯 SWR Activity Rankings:")
+                sorted_idx = sortperm(swr_metrics.swr_counts, rev=true)
+                println("  Most active neurons (by SWR count):")
+                for i in 1:min(3, length(sorted_idx))
+                    idx = sorted_idx[i]
+                    neuron_id = selection.neuron_ids[idx]
+                    count = swr_metrics.swr_counts[idx]
+                    println(@sprintf("    Neuron %2d: %d SWRs", neuron_id, count))
+                end
+                
+                # Identify co-rippling neuron pairs
+                println("\n🔗 Co-Rippling Analysis:")
+                co_rippling_pairs = identify_co_rippling_neurons(swr_metrics, 0.2)
+                
+                if length(co_rippling_pairs) > 0
+                    println("  Found $(length(co_rippling_pairs)) neuron pairs with frequent co-rippling (>20%):")
+                    for (n1, n2, prob) in co_rippling_pairs[1:min(5, length(co_rippling_pairs))]
+                        println(@sprintf("    Neurons %2d ↔ %2d: %.1f%% co-ripple probability", 
+                                        n1, n2, prob*100))
+                    end
+                else
+                    println("  No strong co-rippling detected (threshold = 20%)")
+                end
+                
+                # Synchrony analysis
+                println("\n🎵 Synchrony Analysis:")
+                mean_sync = mean(swr_metrics.synchrony_scores)
+                max_sync_idx = argmax(swr_metrics.synchrony_scores)
+                max_sync_neuron = selection.neuron_ids[max_sync_idx]
+                max_sync_score = swr_metrics.synchrony_scores[max_sync_idx]
+                
+                println(@sprintf("  Mean synchrony score: %.3f", mean_sync))
+                println(@sprintf("  Most synchronized neuron: %d (score=%.3f)", 
+                                max_sync_neuron, max_sync_score))
+                
+                # Generate SWR plots
+                println("\n--- Generating SWR Visualizations ---")
+                swr_output_dir = joinpath(multi_output_dir, "swr_analysis")
+                
+                # Determine time range for raster plot (use full range)
+                time_range_s = (minimum(time_ms)/1000.0, maximum(time_ms)/1000.0)
+                
+                create_swr_report(swr_metrics, swr_output_dir; time_range=time_range_s)
+                
+                println("\n✓ SWR analysis complete!")
+                println("📁 SWR results saved to: $swr_output_dir")
+                println("\nGenerated SWR analysis files:")
+                println("  - swr_comparison.png        # SWR statistics comparison")
+                println("  - co_ripple_matrix.png      # Co-rippling probability heatmap")
+                println("  - swr_raster.png            # Temporal distribution of SWRs")
+                println("  - swr_properties.png        # Duration, amplitude, frequency distributions")
+                println("  - swr_synchrony.png         # Synchrony scores across neurons")
+                
+            catch e
+                println("\n⚠️  SWR detection failed:")
+                println("   Error: $e")
+                println("   Continuing without SWR analysis...")
+                if isa(e, ErrorException)
+                    println("   Stack trace:")
+                    for (exc, bt) in Base.catch_stack()
+                        showerror(stdout, exc, bt)
+                        println()
+                    end
+                end
+            end
+        else
+            println("SWR detection disabled (set ENABLE_SWR_DETECTION = true to enable)")
+        end
+        
+        println("\n" * "="^70)
+        
         println("\n✓ Multi-neuron analysis complete!")
         println("\n📁 Results saved to: $multi_output_dir")
         println("\nGenerated comparative analysis files:")
@@ -859,6 +1012,12 @@ if ENABLE_MULTI_NEURON
         println("  - temporal_dynamics.png                 # All neurons overlaid")
         println("  - temporal_dynamics_highlighted.png     # Highlight top neurons")
         println("  - summary_statistics.png                # Metric relationships")
+        println("\n  SWR Analysis (if enabled):")
+        println("  - swr_analysis/swr_comparison.png       # SWR statistics")
+        println("  - swr_analysis/co_ripple_matrix.png     # Co-rippling heatmap")
+        println("  - swr_analysis/swr_raster.png           # SWR temporal distribution")
+        println("  - swr_analysis/swr_properties.png       # SWR property distributions")
+        println("  - swr_analysis/swr_synchrony.png        # Synchrony scores")
         
     else
         println("⚠️  Need at least 2 valid neurons for comparative analysis")
