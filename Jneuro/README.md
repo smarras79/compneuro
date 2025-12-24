@@ -99,17 +99,17 @@ A complete, professional-grade neural analysis toolkit for detecting Sharp-Wave 
 
 ### 📚 Documentation
 
-8. **`GETTING_STARTED.md`** ⭐ - START HERE!
+8. **`README.md`** - This file
+    - Package structure
+    - File descriptions
+    - Quick reference
+    
+9. **`GETTING_STARTED.md`** ⭐ - START HERE!
    - Step-by-step walkthrough
    - Configuration guide
    - Complete workflow explanation
    - Troubleshooting tips
-
-9. **`README_PACKAGE_OVERVIEW.md`** - This file
-    - Package structure
-    - File descriptions
-    - Quick reference
-
+   
 10. **`NEURAL_ANALYSIS_GUIDE.md`** - In-depth guide
     - Scientific background
     - Algorithm details
