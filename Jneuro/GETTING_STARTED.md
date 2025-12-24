@@ -1,343 +1,441 @@
 # Getting Started - Neural Analysis Toolkit
 
-## 🎯 Everything You Need in One Place
+## 🎯 Quick Start Guide
 
-This is your 5-minute quick-start guide. For details, see the full documentation.
+This guide walks you through the **actual** analysis pipeline as implemented in `main.jl`.
 
 ---
 
-## Step 1: Load Your Data (THE MISSING PIECE!)
+## What You'll Learn
+
+1. How to configure the analysis
+2. How to load and extract your data
+3. How to apply signal filtering
+4. How to extract behavioral events
+5. How to run comprehensive SWR analysis
+6. How to interpret and save results
+
+---
+
+## Step 1: Configure Your Analysis
+
+At the top of `main.jl`, set your parameters:
 
 ```julia
-using MAT
-using Statistics
+# ========== CONFIGURATION ==========
+fs = 1000.0           # Sampling frequency (Hz) - MUST MATCH YOUR SYSTEM
+window_size = 300     # Filter window size
+ineuron = 1           # Which neuron to analyze (1, 2, 3, ...)
 
+# Select filter type
+selected_filter = :moving_average  # Options: :none, :moving_average, 
+                                   #          :gaussian, :savitzky_golay,
+                                   #          :butterworth, :median, :exponential
+```
+
+**Key Configuration:**
+- `fs`: Your recording system's sampling rate
+- `window_size`: Larger = smoother signal, smaller = more detail
+- `ineuron`: Which neuron in your multi-neuron recording
+- `selected_filter`: How to smooth the signal (or `:none` for raw data)
+
+---
+
+## Step 2: Load Your Data
+
+The script loads a `.mat` file with specific structure:
+
+```julia
 # Load the .mat file
-data = matread("../data/amadeus01172020_a_neur_tensor_stim1on.mat")
-
-# Extract the neural tensor
-neur_tensor = data["neur_tensor_stim1on"]
-# This is a 3D array: (neurons × time × trials)
-# Example shape: (3, 3998, 120)
-
-# Extract signal for neuron 1, averaged across all trials
-your_neural_data = vec(mean(neur_tensor[1, :, :], dims=2))
-
-# Check what you have
-println("Signal type: ", typeof(your_neural_data))     # Vector{Float64}
-println("Signal length: ", length(your_neural_data))   # 3998
+data = matread("./data/amadeus01172020_a_neur_tensor_stim1on.mat")
 ```
 
-**This is what "your_neural_data" means in all the examples!**
+**What's in the file:**
+- `neur_tensor_stim1on`: 3D array (neurons × time × trials)
+- `cond_matrix`: Behavioral conditions for each trial
+- `edges` or `stim1on`: Time base for recordings
+- `cond_label`: Labels for condition matrix columns
+
+**Data Structure:**
+```
+neur_tensor_stim1on: (3 neurons, 3998 time points, 120 trials)
+cond_matrix: (120 trials, 12 condition columns)
+edges: (3998,) time points from -2.0s to +2.0s
+```
 
 ---
 
-## Step 2: Run Quick Analysis
+## Step 3: Extract Neural Data
+
+The script extracts specific experimental conditions:
 
 ```julia
-# Load the analysis pipeline
-include("integrated_analysis_pipeline.jl")
+# Extract condition 4: specific experimental parameters
+trid = findall((cond_matrix[:, 10] .== 1) .& 
+               (cond_matrix[:, 3] .== 1) .& 
+               (cond_matrix[:, 4] .== 4))
+fr3 = neur_tensor_stim1on[ineuron, :, trid]
 
-# Set sampling frequency (Hz)
-fs = 1000.0
-
-# Run quick SWR detection
-results = quick_swr_analysis(your_neural_data, fs; plot_results=true)
-
-# See what you found
-println("Detected $(results["n_events"]) Sharp-Wave Ripples")
+# Compute mean across trials
+fr3_mean = vec(mean(fr3, dims=2))
 ```
 
-**That's it! You just detected SWRs.** 🎉
+**What's happening:**
+1. Find trials matching specific conditions
+2. Extract neural data for those trials
+3. Average across trials to get mean firing rate
 
 ---
 
-## Step 3: Run Complete Analysis
+## Step 4: Apply Signal Filtering
+
+Multiple filter options are available:
 
 ```julia
-# For comprehensive analysis with all features:
-results = analyze_neural_data_comprehensive(
-    your_neural_data,
-    nothing;  # No behavioral events yet
-    fs=fs
+# Apply the selected filter
+fr3_smooth = apply_neural_filter(fr3_mean, selected_filter, window_size; 
+                                 filter_params...)
+```
+
+**Available Filters:**
+
+| Filter | Best For | Parameters |
+|--------|----------|------------|
+| `:none` | Raw signal | None |
+| `:moving_average` | General smoothing | window_size |
+| `:gaussian` | Smooth, preserves shape | window_size, sigma |
+| `:savitzky_golay` | Preserves peaks | window_size, poly_order |
+| `:butterworth` | Remove high frequency | cutoff_freq, filter_order |
+| `:median` | Remove spikes | window_size |
+| `:exponential` | Adaptive smoothing | alpha |
+
+**Important:** Filtering trims the signal edges! The script automatically adjusts time bins to match.
+
+---
+
+## Step 5: Extract Behavioral Events
+
+The script automatically extracts when behavior occurred:
+
+```julia
+# Auto-detect motion column
+suggested_column = auto_detect_motion_column(cond_matrix)
+
+# Extract motion events
+behavioral_events = extract_motion_events(
+    cond_matrix, 
+    edges;
+    position_column=suggested_column,
+    threshold_quantile=0.75,  # Top 25% of changes
+    motion_duration=0.5,       # 500ms per event
+    fs=fs,
+    method=:position_change
 )
-
-# Save all results
-save_analysis_results(results, "./my_results")
 ```
 
-**Check ./my_results/ for plots and summary!**
-
----
-
-## Optional: Add Signal Filtering
-
+**What You Get:**
 ```julia
-# Before analysis, filter the signal
-signal_filtered = apply_neural_filter(
-    your_neural_data,
-    :gaussian,  # Filter type
-    300;        # Window size
-    sigma=50.0  # Smoothness
-)
-
-# Then analyze the filtered signal
-results = quick_swr_analysis(signal_filtered, fs)
-```
-
----
-
-## Optional: Add Behavioral Events
-
-```julia
-# Define when events happened (times in seconds)
 behavioral_events = Dict(
-    "motion_onset" => [1.2, 3.5, 7.8, 10.2],
-    "motion_offset" => [2.1, 4.3, 8.5, 11.1]
+    "motion_onset" => [times when motion started],
+    "motion_offset" => [times when motion stopped],
+    "n_events" => total count
 )
-
-# Run analysis with events
-results = analyze_neural_data_comprehensive(
-    your_neural_data,
-    behavioral_events;
-    fs=fs
-)
-
-# Now you can see SWRs at specific behavioral times!
 ```
+
+**Fallback:** If no motion detected, uses trial onset times instead.
 
 ---
 
-## Complete Working Script
+## Step 6: Time Alignment (Automatic)
 
-Copy and paste this entire script:
+The script checks and fixes time alignment issues:
 
 ```julia
-# ==========================================
-# COMPLETE NEURAL ANALYSIS SCRIPT
-# ==========================================
-
-using MAT
-using Statistics
-
-println("=" ^70)
-println("NEURAL ANALYSIS SCRIPT")
-println("=" ^70)
-
-# ===== 1. LOAD DATA =====
-println("\n[1/4] Loading data...")
-
-data = matread("../data/amadeus01172020_a_neur_tensor_stim1on.mat")
-neur_tensor = data["neur_tensor_stim1on"]
-
-# Extract signal
-your_neural_data = vec(mean(neur_tensor[1, :, :], dims=2))
-
-println("  Signal length: $(length(your_neural_data)) samples")
-println("  ✓ Data loaded")
-
-# ===== 2. LOAD ANALYSIS TOOLS =====
-println("\n[2/4] Loading analysis pipeline...")
-
-include("integrated_analysis_pipeline.jl")
-
-println("  ✓ Pipeline loaded")
-
-# ===== 3. RUN ANALYSIS =====
-println("\n[3/4] Running analysis...")
-
-fs = 1000.0  # Sampling frequency in Hz
-
-results = analyze_neural_data_comprehensive(
-    your_neural_data,
-    nothing;  # No behavioral events
-    fs=fs
-)
-
-println("  ✓ Analysis complete")
-
-# ===== 4. DISPLAY AND SAVE RESULTS =====
-println("\n[4/4] Results:")
-
-# SWR count
-n_swr = results["swr_detection"]["n_events"]
-println("  Detected $n_swr Sharp-Wave Ripples")
-
-# Frequency bands
-if haskey(results, "frequency_bands")
-    println("\n  Frequency Band Power:")
-    bands = results["frequency_bands"]
-    for band in sort(collect(keys(bands)))
-        if band != "total_power" && band != "freq" && band != "power_spectrum"
-            info = bands[band]
-            rel_power = get(info, "relative_power", 0.0) * 100
-            println("    $(rpad(band, 12)): $(round(rel_power, digits=1))%")
-        end
-    end
+# Check if events are outside filtered signal bounds
+if n_events_outside > 0
+    # Filter events to match signal
+    # Remove events outside the filtered range
 end
 
-# Save results
-println("\n  Saving results...")
-save_analysis_results(results, "./neural_analysis_output")
+# Shift events to match SWR detection coordinate system
+time_offset = time_bins[1]  # e.g., -1.7s
+behavioral_events_shifted = Dict{String, Any}()
 
-println("\n" * "=" ^70)
-println("✓ COMPLETE!")
-println("Check './neural_analysis_output/' for plots and summary")
-println("=" ^70)
+for (event_type, times) in behavioral_events
+    shifted_times = times .- time_offset  # Convert to 0-based
+    behavioral_events_shifted[event_type] = shifted_times
+end
 ```
 
-**Save this as `my_analysis.jl` and run with: `julia my_analysis.jl`**
+**Why This Matters:**
+- Original recording: -2.0s to +2.0s (event-aligned)
+- Filtered signal: -1.7s to +1.7s (trimmed by filtering)
+- SWR detection: 0.0s to 3.4s (internal time axis)
+
+Events must be shifted to match the SWR detection coordinate system!
 
 ---
 
-## What You Get
+## Step 7: Run Comprehensive Analysis
 
-After running, you'll have:
-
-### Console Output
-```
-======================================================================
-NEURAL ANALYSIS SCRIPT
-======================================================================
-
-[1/4] Loading data...
-  Signal length: 3998 samples
-  ✓ Data loaded
-
-[2/4] Loading analysis pipeline...
-  ✓ Pipeline loaded
-
-[3/4] Running analysis...
-  ✓ Analysis complete
-
-[4/4] Results:
-  Detected 42 Sharp-Wave Ripples
-
-  Frequency Band Power:
-    alpha       : 15.3%
-    beta        : 22.1%
-    delta       : 18.7%
-    high_gamma  : 8.4%
-    low_gamma   : 12.2%
-    ripple      : 3.1%
-    theta       : 20.2%
-
-  Saving results...
-
-======================================================================
-✓ COMPLETE!
-Check './neural_analysis_output/' for plots and summary
-======================================================================
+```julia
+results = analyze_neural_data_comprehensive(
+    signal_filtered,
+    behavioral_events;
+    fs=fs,
+    config=Dict(
+        "ripple_band" => (150.0, 250.0),      # SWR frequency range
+        "swr_threshold_sd" => 3.0,             # Detection threshold
+        "swr_min_duration" => 30.0,            # Minimum 30ms
+        "swr_max_duration" => 200.0,           # Maximum 200ms
+        "event_window_ms" => 500.0,            # ±250ms around events
+        "n_clusters" => 3                      # ML clustering
+    )
+)
 ```
 
-### Files Created
+**What Gets Analyzed:**
+1. ✅ **SWR Detection**: Finds sharp-wave ripples in 150-250 Hz band
+2. ✅ **Frequency Analysis**: Power in delta, theta, alpha, beta, gamma bands
+3. ✅ **Event-Triggered Analysis**: SWRs near behavioral events
+4. ✅ **Enrichment**: Are SWRs more common during behavior?
+5. ✅ **ML Clustering**: Groups similar SWR events
+
+---
+
+## Step 8: View Results
+
+The script displays comprehensive results:
+
+```julia
+# Console output shows:
+📊 NEURAL EVENTS DETECTED (Sharp-Wave Ripples):
+  Total SWRs: 42
+  Duration: 65.3 ± 15.2 ms
+  Amplitude: 4.5 ± 1.2
+
+🎯 BEHAVIORAL EVENTS EXTRACTED:
+  motion_onset: 459 events
+  motion_offset: 468 events
+
+🔗 EVENT-TRIGGERED ANALYSIS:
+  SWRs within ±250ms of motion_onset: 125
+  Rate: 0.27 SWRs per event
+  Enrichment: 2.3x baseline
+
+📈 FREQUENCY BAND POWER:
+  delta (0.5-4 Hz): 18.7%
+  theta (4-8 Hz): 20.2%
+  alpha (8-13 Hz): 15.3%
+  beta (13-30 Hz): 22.1%
+  low_gamma (30-80 Hz): 12.2%
+  high_gamma (80-150 Hz): 8.4%
+  ripple (150-250 Hz): 3.1%
+```
+
+---
+
+## Output Files
+
+Results are saved to `./neural_analysis_output/`:
+
 ```
 neural_analysis_output/
-├── psd.png                    # Power spectrum
-├── spectrogram.png            # Time-frequency
-├── swr_events.png             # Example ripples
-├── ml_clustering.png          # Event clusters
-├── frequency_bands.png        # Band powers
-└── analysis_summary.txt       # Text report
+├── neural_plot_1_moving_average.png       # Smoothed firing rates
+├── scatter_1_moving_average.png           # Behavioral scatter plots
+├── psd.png                                 # Power spectral density
+├── spectrogram.png                         # Time-frequency analysis
+├── swr_events.png                          # Example SWR events
+├── event_triggered_swr.png                 # SWRs around behavior
+├── ml_clustering.png                       # Event clusters
+├── frequency_bands.png                     # Band power comparison
+├── signal_with_events.png                  # Signal + event markers
+└── analysis_summary.txt                    # Complete text report
+```
+
+---
+
+## Customizing the Analysis
+
+### Change Detection Threshold
+
+```julia
+config = Dict(
+    "swr_threshold_sd" => 2.5  # Lower = more sensitive (more SWRs)
+                                # Higher = more selective (fewer SWRs)
+)
+```
+
+### Change Filter Type
+
+```julia
+selected_filter = :gaussian
+filter_params = Dict(:sigma => 100.0)  # Smoother
+```
+
+### Analyze Different Neuron
+
+```julia
+ineuron = 2  # Or 3, 4, ... depending on your data
+```
+
+### Extract Different Conditions
+
+```julia
+# Modify the condition extraction
+trid = findall((cond_matrix[:, 10] .== 1) .& 
+               (cond_matrix[:, 4] .== 5))  # Different condition
+```
+
+---
+
+## Complete Workflow Summary
+
+```
+1. CONFIGURE
+   ├─ Set fs, window_size, ineuron
+   └─ Choose filter type
+
+2. LOAD DATA
+   ├─ Read .mat file
+   └─ Extract experimental conditions
+
+3. PROCESS SIGNAL
+   ├─ Average across trials
+   ├─ Apply filtering
+   └─ Adjust time bins
+
+4. EXTRACT EVENTS
+   ├─ Auto-detect behavioral events
+   ├─ Filter events to signal bounds
+   └─ Shift to SWR time base
+
+5. ANALYZE
+   ├─ Detect SWRs
+   ├─ Analyze frequencies
+   ├─ Event-triggered analysis
+   └─ ML clustering
+
+6. RESULTS
+   ├─ Display summary
+   ├─ Save plots
+   └─ Write report
 ```
 
 ---
 
 ## Troubleshooting
 
-### Error: "cannot find file"
+### Error: "LoadError: KeyError"
 ```julia
-# Check your path
-pwd()  # Shows current directory
-
-# Adjust path to data
-data = matread("path/to/your/data.mat")
-```
-
-### Error: "KeyError: neur_tensor_stim1on"
-```julia
-# Check what keys are available
+# Check available keys in your data
 println(keys(data))
 
-# Use the correct key name
-neur_tensor = data["your_actual_key_name"]
+# Adjust variable names accordingly
+neur_tensor = data["your_actual_key"]
 ```
 
 ### Error: "DimensionMismatch"
 ```julia
 # Check tensor dimensions
-println(size(neur_tensor))  # Should be (neurons, time, trials)
+println(size(neur_tensor_stim1on))
 
-# Make sure you're averaging the right dimension
-your_neural_data = vec(mean(neur_tensor[1, :, :], dims=2))
-#                                                          ↑
-#                                                     dim=2 averages across trials
+# Should be: (neurons, time, trials)
 ```
 
-### No SWRs detected
+### No SWRs Detected
 ```julia
 # Lower the threshold
-config = Dict("swr_threshold_sd" => 2.5)  # Instead of default 3.0
+config = Dict("swr_threshold_sd" => 2.0)
 
-results = analyze_neural_data_comprehensive(
-    your_neural_data, nothing; 
-    fs=fs, 
-    config=config
-)
+# Or check if signal is in correct units (should be firing rate in Hz)
 ```
+
+### Time Alignment Warnings
+```julia
+# This is normal! The script automatically handles it
+# Events outside filtered signal bounds are removed
+# Then shifted to match SWR detection coordinate system
+```
+
+### First-Run Visualization Error
+```julia
+# Also normal! The precompilation fix handles it
+# If error persists on second run, check enhanced_visualization.jl
+```
+
+---
+
+## Advanced: Understanding Time Coordinates
+
+**Three Time Coordinate Systems:**
+
+1. **Original Recording** (`edges`):
+   - Range: -2.0s to +2.0s
+   - Length: 3998 samples
+   - Centered on stimulus onset
+
+2. **Filtered Signal** (`time_bins`):
+   - Range: -1.7s to +1.7s  
+   - Length: 1700 samples
+   - Trimmed by filtering
+
+3. **SWR Detection Internal**:
+   - Range: 0.0s to 3.4s
+   - Length: 1700 samples
+   - Always starts at 0
+
+**The script handles all conversions automatically!**
 
 ---
 
 ## Next Steps
 
-1. ✅ You've run basic analysis
-2. 📖 Read `DATA_LOADING_GUIDE.md` for advanced data extraction
-3. 🎨 Read `FILTERING_GUIDE.md` to improve signal quality
-4. 🧠 Read `NEURAL_ANALYSIS_GUIDE.md` for in-depth understanding
-5. 🔧 Customize parameters for your specific research question
+1. ✅ Run `main.jl` with default settings
+2. 📊 Check `./neural_analysis_output/` for results
+3. 🔧 Adjust configuration parameters
+4. 📖 Read full documentation for deeper understanding
+5. 🧪 Try different filter types and thresholds
 
 ---
 
-## File Guide
+## Quick Reference
 
-**Start Here:**
-- `GETTING_STARTED.md` ← You are here!
-- `DATA_LOADING_GUIDE.md` - How to extract your data
-- `QUICK_REFERENCE.md` - One-page cheat sheet
+**Essential Files:**
+- `main.jl` - Main analysis script (this document)
+- `integrated_analysis_pipeline.jl` - Analysis functions
+- `behavioral_event_extraction.jl` - Event detection
+- `enhanced_visualization.jl` - Publication-quality plots
+- `auxiliary_functions.jl` - Filtering functions
 
-**For Analysis:**
-- `integrated_analysis_pipeline.jl` - Main analysis code
-- `example_complete_analysis.jl` - Complete working example
+**Key Parameters:**
+- `fs = 1000.0` - Sampling frequency
+- `selected_filter = :moving_average` - Filter type
+- `swr_threshold_sd = 3.0` - Detection threshold
+- `event_window_ms = 500.0` - Time window around events
 
-**For Deep Dive:**
-- `NEURAL_ANALYSIS_GUIDE.md` - Complete documentation
-- `README_PACKAGE_OVERVIEW.md` - Package overview
-
-**For Problems:**
-- `TROUBLESHOOTING.md` - Common issues
-- `BUG_FIXES_V1.1.md` - Recent fixes
-
----
-
-## Summary
-
-### The Key Points
-
-1. **Your data comes from**: `vec(mean(neur_tensor[1, :, :], dims=2))`
-2. **Quick analysis**: `quick_swr_analysis(your_neural_data, 1000.0)`
-3. **Complete analysis**: `analyze_neural_data_comprehensive(your_neural_data, nothing; fs=1000.0)`
-4. **Results are saved**: Check the output directory for plots
-
-### The Three Lines You Need
-
-```julia
-your_neural_data = vec(mean(neur_tensor[1, :, :], dims=2))
-include("integrated_analysis_pipeline.jl")
-results = quick_swr_analysis(your_neural_data, 1000.0)
+**Run the script:**
+```bash
+julia main.jl
 ```
 
-**That's literally it!** Everything else is optional enhancement. 🎉
+**That's it!** The script is fully automated and handles all the complexity internally. 🎉
 
 ---
 
-**Ready?** Copy the complete script above and run it! 🚀
+## Summary: What main.jl Does
+
+```julia
+# Pseudocode version
+configure_parameters()
+load_data()
+extract_conditions()
+apply_filtering()
+extract_behavioral_events()
+check_and_fix_time_alignment()
+shift_events_to_swr_coordinates()
+run_comprehensive_analysis()
+display_and_save_results()
+```
+
+**All automatic. All integrated. All publication-ready.** ✨
