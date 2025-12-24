@@ -1,14 +1,14 @@
 # 🧠 Neural Analysis Toolkit - Complete Package
 
-## 📦 What You Have
+## What You Have
 
 A complete, professional-grade neural analysis toolkit for detecting Sharp-Wave Ripples (SWRs), analyzing neural-behavioral coupling, and generating publication-quality visualizations. Features automatic behavioral event extraction, time alignment correction, and comprehensive statistical analysis.
 
 ---
 
-## 🗂️ File Structure
+## File Structure
 
-### 🎯 Main Analysis Script
+### Main Analysis Script
 
 **`main.jl`** - Complete automated pipeline (~584 lines)
 - Loads data from .mat files
@@ -85,7 +85,7 @@ A complete, professional-grade neural analysis toolkit for detecting Sharp-Wave 
 
 ---
 
-### 🎯 Event Extraction
+### Event Extraction
 
 7. **`behavioral_event_extraction.jl`** - Automatic event detection (~300 lines)
    - Auto-detects motion/position columns
@@ -332,7 +332,7 @@ config = Dict(
 
 ---
 
-## 🎯 Key Features
+## Key Features
 
 ### ✅ Automatic Time Alignment
 - Handles coordinate system mismatches
@@ -358,15 +358,9 @@ config = Dict(
 - Statistical testing
 - Enrichment calculations
 
-### ✅ Publication Ready
-- 600 DPI figures
-- Professional formatting
-- Colorblind-friendly colors
-- Complete text reports
-
 ---
 
-## 📂 Output Files
+## Output Files
 
 After running `main.jl`, check `./neural_analysis_output/`:
 
@@ -414,7 +408,7 @@ Event at -1.5s → shifted to 0.2s for SWR detection ✓
 
 ---
 
-## 🎓 Scientific Background
+## Scientific Background
 
 ### Sharp-Wave Ripples (SWRs)
 - High-frequency oscillations (150-250 Hz)
@@ -439,7 +433,7 @@ Event at -1.5s → shifted to 0.2s for SWR detection ✓
 
 ---
 
-## 🛠️ Dependencies
+## 🛠Dependencies
 
 ### Required Packages
 ```julia
