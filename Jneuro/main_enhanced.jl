@@ -6,11 +6,11 @@ using Plots
 using Colors
 using Printf
 using LaTeXStrings
-using Revise
 
 include("./enhanced_visualization.jl")
 include("./auxiliary_functions.jl")  # Load filter function
 include("./data_inspector.jl")  # Load data inspection utility
+include("./smart_extractor.jl")  # Load smart variable extraction
 
 include("./multi_neuron_analysis.jl")
 include("./multi_neuron_plots.jl")
@@ -23,6 +23,7 @@ using .MultiNeuronPlots
 using .MultiNeuronSWR
 using .MultiNeuronSWRPlots
 using .DataInspector
+using .SmartExtractor
 
 # Explicitly import types for direct use in Main scope
 using .MultiNeuronAnalysis: NeuronSelection, ComparativeMetrics, 
@@ -41,17 +42,29 @@ ineuron = 1
 # Data inspection configuration
 ENABLE_DATA_INSPECTION = true  # Set to false to skip inspection and pause
 
+# Smart extraction configuration
+ENABLE_SMART_EXTRACTION = true  # Set to true to use automatic variable detection
+                                 # Set to false to use hard-coded variable names (RECOMMENDED for known files)
+
+# Load the .mat file
+data_type = "joyon"
+#data_type = "stim1on"
+#data_type = "stim1on"
+
+data_file = string("./data/amadeus01172020_a_neur_tensor_", data_type, ".mat")
+data = matread(data_file)
+output_dir = "./neural_analysis_output"
+
+
 println("Configuration:")
+println("  File: $(data_file) ")
 println("  Sampling frequency: $(fs) Hz")
 println("  Window size: $(window_size)")
 println("  Neuron $(ineuron)")
 println("  Data inspection: $(ENABLE_DATA_INSPECTION ? "enabled" : "disabled")")
+println("  Smart extraction: $(ENABLE_SMART_EXTRACTION ? "enabled" : "disabled")")
 println()
 
-# Load the .mat file
-data = matread("./data/amadeus01172020_a_neur_tensor_stim1on.mat")
-# Alternative file: amadeus01172020_a_neur_tensor_joyon.mat
-output_dir = "./neural_analysis_output"
 
 #------------------------------------------------------------------------
 #%% DATA INSPECTION - Review file contents before proceeding
@@ -59,9 +72,11 @@ output_dir = "./neural_analysis_output"
 if ENABLE_DATA_INSPECTION
     # Inspect the loaded MAT file to understand its structure
     inspect_mat_file(data)
+
+    neur_tensor_var = data_type
     
     # Validate that expected variables are present
-    expected_variables = ["cond_label", "cond_matrix", "neur_tensor_stim1on", "stim1on"]
+    expected_variables = ["cond_label", "cond_matrix", string("neur_tensor_", neur_tensor_var), neur_tensor_var]
     validate_expected_variables(data, expected_variables)
     
     # Pause for user confirmation before proceeding with analysis
@@ -99,25 +114,130 @@ println("Using filter: $(selected_filter)")
 println("Window size: $(window_size)")
 println()
 
-# Extract variables from the loaded data
-cond_label          = data["cond_label"]
-cond_matrix         = data["cond_matrix"]
-neur_tensor_stim1on = data["neur_tensor_stim1on"]
-stim1on             = data["stim1on"]
 
-# Get time edges
-edges = if haskey(stim1on, "edges")
-    stim1on["edges"]
-else
-    stim1on
+#------------------------------------------------------------------------
+# Load data
+#------------------------------------------------------------------------
+# SIMPLE DIRECT LOADING - NO SCOPE ISSUES
+# Replace lines 108-280 in main_enhanced.jl with this
+
+#------------------------------------------------------------------------
+#%% VARIABLE EXTRACTION - Direct method (no scoping issues)
+#------------------------------------------------------------------------
+println("\n" * "="^70)
+println("LOADING VARIABLES FROM MAT FILE")
+println("="^70)
+println()
+
+# Load variables DIRECTLY at top level - no conditionals, no scope issues
+println("Loading variables...")
+
+cond_label = try
+    val = data["cond_label"]
+    println("  ✓ cond_label: $(typeof(val))")
+    val
+catch e
+    println("  ⚠️  cond_label not found: $e")
+    nothing
 end
+
+cond_matrix = try
+    val = data["cond_matrix"]
+    println("  ✓ cond_matrix: $(typeof(val)), size=$(size(val))")
+    val
+catch e
+    println("  ⚠️  cond_matrix not found: $e")
+    nothing
+end
+
+neur_tensor_stim1on = try
+    data_string = string("neur_tensor_", data_type)
+    val = data[data_string]
+    dims = size(val)
+    println("  ✓ neur_tensor_stim1on: $(typeof(val)), size=$(dims)")
+    println("    → $(dims[1]) neurons × $(dims[2]) time bins × $(dims[3]) trials")
+    val
+catch e
+    error("  ✗ neur_tensor_stim1on REQUIRED but not found: $e")
+end
+
+stim1on = try
+    val = data[data_type]
+    println("  ✓ stim1on: $(typeof(val))")
+    if isa(val, AbstractDict)
+        println("    → Dict with keys: $(collect(keys(val)))")
+    elseif isa(val, AbstractArray)
+        println("    → Array with size: $(size(val))")
+    end
+    val
+catch e
+    println("  ⚠️  stim1on not found: $e")
+    nothing
+end
+
+# Extract edges
+println("\nExtracting time edges...")
+edges = if !isnothing(stim1on)
+    if isa(stim1on, AbstractDict) && haskey(stim1on, "edges")
+        val = stim1on["edges"]
+        println("  ✓ Extracted edges from stim1on Dict")
+        println("    → Type: $(typeof(val)), size=$(size(val))")
+        if length(val) > 0
+            println("    → Range: $(val[1]) to $(val[end])")
+        end
+        val
+    elseif isa(stim1on, AbstractArray)
+        println("  ✓ Using stim1on directly as edges")
+        println("    → Type: $(typeof(stim1on)), size=$(size(stim1on))")
+        stim1on
+    else
+        println("  ⚠️  stim1on has unexpected type, generating defaults")
+        collect(0.0:1.0/fs:(size(neur_tensor_stim1on, 2)-1)/fs)
+    end
+elseif !isnothing(neur_tensor_stim1on)
+    val = collect(0.0:1.0/fs:(size(neur_tensor_stim1on, 2)-1)/fs)
+    println("  ✓ Generated time edges from neural tensor")
+    println("    → $(length(val)) time bins")
+    val
+else
+    error("Cannot determine time edges!")
+end
+
+println("\n" * "="^70)
+println("VARIABLES LOADED SUCCESSFULLY")
+println("="^70)
+println("  Neural tensor: $(size(neur_tensor_stim1on))")
+if !isnothing(cond_matrix)
+    println("  Condition matrix: $(size(cond_matrix))")
+end
+if !isnothing(cond_label)
+    println("  Condition labels: $(length(cond_label)) labels")
+end
+println("  Time edges: $(length(edges)) bins")
+println()
+
+# Display condition labels if available
+if !isnothing(cond_label)
+    println("Condition labels:")
+    println(cond_label)
+    println()
+else
+    println("⚠️  No condition labels available")
+    println()
+end
+
 
 #------------------------------------------------------------------------
 # Display condition labels (tells you which column codes for what task parameter)
 #------------------------------------------------------------------------
-println("Condition labels:")
-println(cond_label)
-println()
+if !isnothing(cond_label)
+    println("Condition labels:")
+    println(cond_label)
+    println()
+else
+    println("⚠️  No condition labels available - using generic column names")
+    println()
+end
 
 #------------------------------------------------------------------------
 #%% OPTIONAL: Shift time base to start at t=0
@@ -147,24 +267,35 @@ end
 #------------------------------------------------------------------------
 println("Extracting neural data...")
 
-#------------------------------------------------------------------------
-# Extract firing rates for condition 4 (column 10==1 & column 3==1 & column 4==4)
-#------------------------------------------------------------------------
-trid = findall((cond_matrix[:, 10] .== 1) .& 
-               (cond_matrix[:, 3] .== 1) .& 
-               (cond_matrix[:, 4] .== 4))
-fr3 = neur_tensor_stim1on[ineuron, :, trid]
-println("  fr3 extracted: $(size(fr3)) from $(length(trid)) trials")
-
-#------------------------------------------------------------------------
-# Extract firing rates for condition 5 (column 10==1 & column 3==1 & column 4==5)
-#------------------------------------------------------------------------
-trid = findall((cond_matrix[:, 10] .== 1) .& 
-               (cond_matrix[:, 3] .== 1) .& 
-               (cond_matrix[:, 4] .== 5))
-fr4 = neur_tensor_stim1on[ineuron, :, trid]
-println("  fr4 extracted: $(size(fr4)) from $(length(trid)) trials")
-println()
+# Check if we have condition matrix for trial selection
+if !isnothing(cond_matrix)
+    #------------------------------------------------------------------------
+    # Extract firing rates for condition 4 (column 10==1 & column 3==1 & column 4==4)
+    #------------------------------------------------------------------------
+    trid = findall((cond_matrix[:, 10] .== 1) .& 
+                   (cond_matrix[:, 3] .== 1) .& 
+                   (cond_matrix[:, 4] .== 4))
+    fr3 = neur_tensor_stim1on[ineuron, :, trid]
+    println("  fr3 extracted: $(size(fr3)) from $(length(trid)) trials")
+    
+    #------------------------------------------------------------------------
+    # Extract firing rates for condition 5 (column 10==1 & column 3==1 & column 4==5)
+    #------------------------------------------------------------------------
+    trid = findall((cond_matrix[:, 10] .== 1) .& 
+                   (cond_matrix[:, 3] .== 1) .& 
+                   (cond_matrix[:, 4] .== 5))
+    fr4 = neur_tensor_stim1on[ineuron, :, trid]
+    println("  fr4 extracted: $(size(fr4)) from $(length(trid)) trials")
+    println()
+else
+    # Use all trials if no condition matrix
+    println("  ⚠️  No condition matrix - using all trials")
+    n_trials = size(neur_tensor_stim1on, 3)
+    fr3 = neur_tensor_stim1on[ineuron, :, 1:min(n_trials÷2, n_trials)]
+    fr4 = neur_tensor_stim1on[ineuron, :, max(1, n_trials÷2+1):n_trials]
+    println("  fr3: $(size(fr3)), fr4: $(size(fr4))")
+    println()
+end
 
 if !isdir(output_dir)
     mkdir(output_dir)
@@ -173,17 +304,21 @@ end
 #------------------------------------------------------------------------
 #%% Behavioural data
 #------------------------------------------------------------------------
-# Find trials where column 10 == 1
-trid    = findall(cond_matrix[:, 10] .== 1)
-ta_att1 = cond_matrix[trid, 1]
-tp_att1 = cond_matrix[trid, 2]
-neural_plots_scatter(ta_att1, tp_att1, "1", selected_filter; output_dir=output_dir)
-
-# Second subplot - find trials where column 12 == 1
-trid    = findall(cond_matrix[:, 12] .== 1)
-ta_att2 = cond_matrix[trid, 1]
-tp_att2 = cond_matrix[trid, 2]
-neural_plots_scatter(ta_att2, tp_att2, "2", selected_filter; output_dir=output_dir)
+if !isnothing(cond_matrix)
+    # Find trials where column 10 == 1
+    trid    = findall(cond_matrix[:, 10] .== 1)
+    ta_att1 = cond_matrix[trid, 1]
+    tp_att1 = cond_matrix[trid, 2]
+    neural_plots_scatter(ta_att1, tp_att1, "1", selected_filter; output_dir=output_dir)
+    
+    # Second subplot - find trials where column 12 == 1
+    trid    = findall(cond_matrix[:, 12] .== 1)
+    ta_att2 = cond_matrix[trid, 1]
+    tp_att2 = cond_matrix[trid, 2]
+    neural_plots_scatter(ta_att2, tp_att2, "2", selected_filter; output_dir=output_dir)
+else
+    println("⚠️  Skipping behavioral scatter plots - no condition matrix available")
+end
 
 #------------------------------------------------------------------------
 #%% Apply selected filter to neural data
@@ -659,10 +794,15 @@ if ENABLE_MULTI_NEURON
         println("\n--- Step 1: Extracting Firing Rates ---")
         
         # Extract firing rates for selected neurons (using same condition as before)
-        # Condition: column 10==1 & column 3==1 & column 4==4
-        trid_multi = findall((cond_matrix[:, 10] .== 1) .& 
-                            (cond_matrix[:, 3] .== 1) .& 
-                            (cond_matrix[:, 4] .== 4))
+        if !isnothing(cond_matrix)
+            # Condition: column 10==1 & column 3==1 & column 4==4
+            trid_multi = findall((cond_matrix[:, 10] .== 1) .& 
+                                (cond_matrix[:, 3] .== 1) .& 
+                                (cond_matrix[:, 4] .== 4))
+        else
+            # Use all trials if no condition matrix
+            trid_multi = collect(1:size(neur_tensor_stim1on, 3))
+        end
         
         n_neurons_selected = length(valid_neurons)
         n_time_points = size(neur_tensor_stim1on, 2)
